@@ -62,6 +62,6 @@ UPDATE employes SET salaire = salaire + 100 WHERE emp_id IN (102, 103);`,
     { l: [11, 13], n: "<b>AFTER ROW</b> pour 103.", p: 1, o: "AFTER ROW 103" },
     { l: [16, 18], n: "<b>AFTER STATEMENT</b> : une seule fois, après toutes les lignes. Plus de <code>:OLD</code> / <code>:NEW</code>, mais la table peut de nouveau être lue sans ORA-04091.",
       v: { "emp_id": "(inaccessible)", ":OLD.salaire": "(inaccessible)", ":NEW.salaire": "(inaccessible)" }, o: "AFTER STATEMENT" },
-    { l: 21, n: "Fin de l'ordre : 2 lignes mises à jour. SQL*Plus affiche son message de retour, puis le tampon DBMS_OUTPUT. Pense à <code>ROLLBACK</code> et à supprimer ces quatre triggers de démonstration." }
+    { l: 21, n: "Fin de l'ordre : 2 lignes modifiées. Ton outil affiche le contenu du tampon DBMS_OUTPUT (avec <code>SET SERVEROUTPUT ON</code>) et le nombre de lignes mises à jour. Pense à <code>ROLLBACK</code> et à supprimer ces quatre triggers de démonstration." }
   ]
 };

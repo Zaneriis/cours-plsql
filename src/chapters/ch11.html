@@ -26,12 +26,12 @@
       <tr><td>Fin de session</td><td>Normale : dépend de l'outil (SQL*Plus valide à <code>EXIT</code> par défaut) ; anormale : annulée</td></tr>
     </tbody>
   </table></div>
-  <div class="callout pitfall"><span class="ct">Piège : le DDL valide tout ce qui précède</span><p>Un <code>EXECUTE IMMEDIATE 'CREATE TABLE …'</code> ou un <code>TRUNCATE</code> au milieu d'un traitement valide silencieusement tous les DML en attente : le <code>ROLLBACK</code> du bloc <code>EXCEPTION</code> n'aura plus rien à annuler. Le COMMIT d'avant a lieu même si le DDL échoue ensuite (table déjà existante, par exemple).</p></div>
+  <div class="callout pitfall"><span class="ct">Piège : le DDL valide tout ce qui précède</span><p>Un <code>EXECUTE IMMEDIATE 'CREATE TABLE …'</code> ou un <code>TRUNCATE</code> au milieu d'un traitement valide silencieusement tous les DML en attente : le <code>ROLLBACK</code> du bloc <code>EXCEPTION</code> n'aura plus rien à annuler. Le COMMIT d'avant a lieu même si le DDL échoue ensuite à l'exécution (table déjà existante, par exemple) ; seule une erreur de syntaxe, détectée avant l'exécution, ne déclenche pas ce COMMIT. Ne compte donc jamais sur l'échec d'un DDL pour préserver ta transaction.</p></div>
   <div class="callout interview"><span class="ct">En entretien : « Qui doit faire le COMMIT ? »</span><p>L'<strong>appelant de plus haut niveau</strong>, celui qui connaît le périmètre de l'unité de travail (le service applicatif, le job batch). Une procédure réutilisable ne doit pas valider elle-même : si elle est appelée au milieu d'un traitement plus large, son <code>COMMIT</code> validerait aussi le travail de l'appelant, qui ne pourrait plus tout annuler.</p></div>
-  <div class="callout pitfall"><span class="ct">Piège : COMMIT dans une boucle</span><p>Valider « toutes les 1 000 lignes » est une fausse bonne idée : c'est plus lent (chaque <code>COMMIT</code> attend l'écriture du journal), un traitement interrompu laisse des données à moitié traitées et difficiles à reprendre, et un curseur ouvert sur des données que tu modifies peut lever <code>ORA-01555: snapshot too old</code>. Sur un curseur <code>FOR UPDATE</code>, c'est <code>ORA-01002</code> (<a href="#ch04">chapitre 04</a>). Valide une fois, à la fin.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège : COMMIT dans une boucle</span><p>Valider « toutes les 1 000 lignes » est une fausse bonne idée : c'est généralement plus lent (chaque <code>COMMIT</code> déclenche une écriture du journal de reprise et a un coût fixe), un traitement interrompu laisse des données à moitié traitées et difficiles à reprendre, et un curseur ouvert sur des données que tu modifies peut lever <code>ORA-01555: snapshot too old</code>. Sur un curseur <code>FOR UPDATE</code>, c'est <code>ORA-01002</code> (<a href="#ch04">chapitre 04</a>). Valide une fois, à la fin.</p></div>
 
   <h2>Lecture cohérente, isolation et verrous</h2>
-  <p class="prose">Oracle garantit que chaque requête voit les données <strong>telles qu'elles étaient validées au moment où elle a commencé</strong>, même si d'autres sessions les modifient pendant sa lecture (il reconstitue l'ancienne image grâce à l'undo). Conséquence : <strong>une lecture ne bloque jamais une écriture et une écriture ne bloque jamais une lecture</strong>. Seules deux écritures sur la <strong>même ligne</strong> s'attendent : la seconde patiente jusqu'au <code>COMMIT</code> ou au <code>ROLLBACK</code> de la première.</p>
+  <p class="prose">Oracle garantit que chaque requête voit les données <strong>telles qu'elles étaient validées au moment où elle a commencé</strong>, même si d'autres sessions les modifient pendant sa lecture (il reconstitue l'ancienne image grâce à l'undo). Conséquence : <strong>une lecture ne bloque jamais une écriture et une écriture ne bloque jamais une lecture</strong> (un <code>SELECT … FOR UPDATE</code> n'est pas une simple lecture : il verrouille les lignes comme une écriture). Seules deux écritures sur la <strong>même ligne</strong> s'attendent : la seconde patiente jusqu'au <code>COMMIT</code> ou au <code>ROLLBACK</code> de la première.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Niveau d'isolation</th><th>Ce que voit chaque requête</th><th>À retenir</th></tr></thead>
     <tbody>
@@ -160,7 +160,7 @@ Plus de 5000 : Moreau</div>
     <ul>
       <li>Une variable liée remplace une <strong>valeur</strong>, jamais un identifiant : <code>'SELECT COUNT(*) FROM :t'</code> lève <code>ORA-00903: invalid table name</code>.</li>
       <li>Dans un ordre SQL dynamique, les variables liées sont associées <strong>par position</strong>, pas par nom : <code>:x</code> écrit deux fois demande deux valeurs dans <code>USING</code>.</li>
-      <li>Pas de point-virgule final dans un ordre SQL (<code>'… WHERE emp_id = :id;'</code> provoque une erreur de syntaxe, <code>ORA-00911: invalid character</code> en 19c). Un bloc PL/SQL dynamique, lui, se termine par <code>END;</code>.</li>
+      <li>Pas de point-virgule final dans un ordre SQL (<code>'… WHERE emp_id = :id;'</code> provoque une erreur à l'exécution, typiquement <code>ORA-00911: invalid character</code> en 19c ; le code et le message exacts peuvent varier selon la version). Un bloc PL/SQL dynamique, lui, se termine par <code>END;</code>.</li>
     </ul>
   </div>
 
@@ -245,7 +245,7 @@ Plus de 5000 : Moreau</div>
           <li>Le <code>CREATE TABLE</code> fait un COMMIT implicite : le premier <code>UPDATE</code> (1400 → 1500) est validé à ce moment-là.</li>
           <li>Le <code>ROLLBACK</code> n'annule que le second <code>UPDATE</code>. La table <code>tmp_e4</code> existe toujours : un DDL ne s'annule pas.</li>
         </ul>
-        <p class="hint">Nettoyage : <code>DROP TABLE tmp_e4 PURGE;</code> puis relance le script du chapitre 00 pour retrouver les données d'origine.</p>
+        <p class="hint">Si tu relances le bloc sans supprimer <code>tmp_e4</code>, le <code>CREATE TABLE</code> lève <code>ORA-00955</code>, mais le COMMIT implicite a déjà eu lieu : le premier <code>UPDATE</code> est validé quand même. Nettoyage : <code>DROP TABLE tmp_e4 PURGE;</code> puis relance le script du chapitre 00 pour retrouver les données d'origine.</p>
       </details>
     </div>
   </div>

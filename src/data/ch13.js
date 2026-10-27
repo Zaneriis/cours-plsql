@@ -14,7 +14,7 @@ FLASH.push(
   { t: "NULL", q: "Que vaut <code>''</code> dans Oracle ? Et <code>'A' || NULL</code> ?",
     a: "<p>La chaîne vide <em>est</em> NULL dans Oracle : <code>'' IS NULL</code> est vrai. La concaténation, elle, ignore NULL : <code>'A' || NULL</code> donne <code>'A'</code>.</p>" },
   { t: "NULL", q: "Pourquoi <code>WHERE dept_id NOT IN (SELECT dept_id FROM employes)</code> peut-il ne rien renvoyer ?",
-    a: "<p>Si la sous-requête renvoie un seul NULL, <code>x NOT IN (…, NULL)</code> vaut NULL pour toutes les lignes : aucune n'est retenue. On écrit <code>NOT EXISTS</code>, ou on filtre <code>WHERE dept_id IS NOT NULL</code> dans la sous-requête.</p>" },
+    a: "<p>Si la sous-requête renvoie un seul NULL, <code>x NOT IN (…, NULL)</code> ne vaut jamais TRUE (FALSE si <code>x</code> est dans la liste, NULL sinon) : aucune ligne n'est retenue. On écrit <code>NOT EXISTS</code>, ou on filtre <code>WHERE dept_id IS NOT NULL</code> dans la sous-requête.</p>" },
   { t: "NULL", q: "Différence entre <code>NVL</code> et <code>COALESCE</code> ?",
     a: "<p><code>NVL(a, b)</code> prend deux arguments et évalue toujours les deux. <code>COALESCE(a, b, c…)</code> accepte une liste, renvoie la première valeur non nulle et s'arrête dès qu'il la trouve. <code>COALESCE</code> est standard ANSI.</p>" },
   { t: "Types", q: "À quoi servent <code>%TYPE</code> et <code>%ROWTYPE</code> ?",
@@ -38,7 +38,7 @@ FLASH.push(
   { t: "Exceptions", q: "Différence entre <code>RAISE</code> et <code>RAISE_APPLICATION_ERROR</code> ?",
     a: "<p><code>RAISE</code> lève une exception nommée, ou re-lève l'exception courante s'il est seul dans un gestionnaire. <code>RAISE_APPLICATION_ERROR(-20001, 'message')</code> crée une erreur ORA- avec un code entre -20000 et -20999 et un message lisible par l'application cliente.</p>" },
   { t: "Exceptions", q: "Pourquoi <code>WHEN OTHERS THEN NULL</code> est-il un anti-pattern ?",
-    a: "<p>Il avale toutes les erreurs, y compris les imprévues : le programme « réussit », l'appelant peut valider des données incohérentes et personne n'est prévenu. Au minimum : journaliser (transaction autonome) puis <code>RAISE;</code>. Le compilateur le signale (avertissement PLW-06009).</p>" },
+    a: "<p>Il avale toutes les erreurs, y compris les imprévues : le programme « réussit », l'appelant peut valider des données incohérentes et personne n'est prévenu. Au minimum : journaliser (transaction autonome) puis <code>RAISE;</code>. Si les avertissements sont activés (<code>PLSQL_WARNINGS</code>), le compilateur le signale (PLW-06009).</p>" },
   { t: "Exceptions", q: "Comment retrouver le numéro de ligne d'une erreur ?",
     a: "<p><code>DBMS_UTILITY.FORMAT_ERROR_BACKTRACE</code> dans le gestionnaire, avant tout <code>RAISE</code> qui ferait perdre l'origine. <code>SQLERRM</code> ne donne que le message. Depuis 12c, <code>UTL_CALL_STACK</code> donne la même information de façon structurée.</p>" },
   { t: "Exceptions", q: "À quoi sert <code>PRAGMA EXCEPTION_INIT</code> ?",
@@ -84,7 +84,7 @@ FLASH.push(
   { t: "Triggers", q: "Peut-on modifier <code>:NEW</code> dans un trigger AFTER ? Faire un <code>COMMIT</code> dans un trigger ?",
     a: "<p><code>:NEW</code> n'est modifiable qu'en <code>BEFORE … FOR EACH ROW</code> (sinon ORA-04084). Un <code>COMMIT</code> dans un trigger lève ORA-04092, sauf dans un trigger en transaction autonome, réservé à la journalisation.</p>" },
   { t: "Triggers", q: "Dans quel ordre se déclenchent les triggers DML ?",
-    a: "<p><code>BEFORE STATEMENT</code>, puis pour chaque ligne <code>BEFORE ROW</code>, écriture de la ligne, <code>AFTER ROW</code>, enfin <code>AFTER STATEMENT</code>. Entre deux triggers du même type, l'ordre n'est garanti qu'avec <code>FOLLOWS</code> / <code>PRECEDES</code> (11g).</p>" },
+    a: "<p><code>BEFORE STATEMENT</code>, puis pour chaque ligne <code>BEFORE ROW</code>, écriture de la ligne, <code>AFTER ROW</code>, enfin <code>AFTER STATEMENT</code>. Entre deux triggers du même type, l'ordre n'est garanti qu'avec la clause <code>FOLLOWS</code> (11g).</p>" },
 
   /* ---------- Transactions et SQL dynamique ---------- */
   { t: "Transactions", q: "Qu'est-ce qu'une transaction autonome ? Un cas d'usage légitime ?",

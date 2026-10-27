@@ -195,7 +195,7 @@ REVERSE 1</div>
   <h3>Ce qu'il faut savoir sur FOR</h3>
   <ul class="prose">
     <li>L'indice est déclaré implicitement en <code>PLS_INTEGER</code>, n'existe que dans la boucle et est <strong>en lecture seule</strong> : <code>j := 5</code> provoque <code>PLS-00363</code> à la compilation.</li>
-    <li>Les bornes sont évaluées <strong>une seule fois</strong> à l'entrée (et arrondies à l'entier le plus proche si besoin) : modifier la variable de borne dans la boucle ne change pas le nombre de tours.</li>
+    <li>Les bornes sont évaluées <strong>une seule fois</strong> à l'entrée et converties en <code>PLS_INTEGER</code>, donc arrondies à l'entier le plus proche si ce ne sont pas des entiers (<code>FOR i IN 1 .. 2.5</code> fait 3 tours) : modifier la variable de borne dans la boucle ne change pas le nombre de tours.</li>
     <li>Si la borne basse dépasse la borne haute (<code>FOR i IN 5 .. 1</code>), la boucle ne s'exécute pas du tout, sans erreur. Pour descendre : <code>REVERSE 1 .. 5</code> (la borne basse reste à gauche).</li>
     <li>Si une variable porte déjà le nom de l'indice, l'indice la <strong>masque</strong> dans la boucle sans la modifier. Après la boucle, on retrouve l'ancienne valeur.</li>
   </ul>
@@ -216,7 +216,7 @@ REVERSE 1</div>
 tour 2
 tour 3
 i = 99, l_fin = 10</div>
-  <p class="prose">Le pas est toujours de 1 jusqu'en 19c. Depuis <strong>21c</strong> (donc en 23ai), la clause <code>BY</code> fixe un pas, et d'autres contrôles d'itération sont apparus (plusieurs plages séparées par des virgules, filtre <code>WHEN</code>, parcours de collection avec <code>VALUES OF</code> / <code>INDICES OF</code>). En 19c, on calcule la valeur à partir de l'indice.</p>
+  <p class="prose">Le pas est toujours de 1 jusqu'en 19c. Depuis <strong>21c</strong> (donc en 23ai), la clause <code>BY</code> fixe un pas strictement positif (<code>FOR i IN 1 .. 10 BY 3</code>, la borne haute reste une limite et n'est pas forcément atteinte), et d'autres contrôles d'itération sont apparus (plusieurs plages séparées par des virgules, filtre <code>WHEN</code>, parcours de collection avec <code>VALUES OF</code> / <code>INDICES OF</code>). En 19c, on calcule la valeur à partir de l'indice.</p>
   <script type="text/plsql" data-title="Un pas de 3, avant et depuis 21c">
     BEGIN
       FOR i IN 1 .. 10 BY 3 LOOP      -- 21c et plus : 1, 4, 7, 10
@@ -378,7 +378,7 @@ i = 99, l_fin = 10</div>
           /
         </script>
         <div class="output">15 ans : 4442 (cible 4320)</div>
-        <p class="hint">Deux pièges. Si le taux valait 1 (ou moins), la condition resterait vraie pour toujours : d'où le garde-fou. Et si la cible était <code>NULL</code> (un département sans employé, comme le 40, donne <code>AVG = NULL</code>), <code>l_sal &lt; NULL</code> vaut NULL : aucun tour, et le programme afficherait « 0 ans » sans erreur. Un test <code>IF l_cible IS NULL</code> avant la boucle s'impose.</p>
+        <p class="hint">Deux pièges. Si le taux valait 1 (ou moins), ou si l'arrondi annulait l'augmentation (un taux de 1,0001 sur 1400 redonne 1400), la condition resterait vraie pour toujours : d'où le garde-fou. Et si la cible était <code>NULL</code> (un département sans employé, comme le 40, donne <code>AVG = NULL</code>), <code>l_sal &lt; NULL</code> vaut NULL : aucun tour, et le programme afficherait « 0 ans » sans erreur. Un test <code>IF l_cible IS NULL</code> avant la boucle s'impose.</p>
       </details>
     </div>
   </div>

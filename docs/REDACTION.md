@@ -108,7 +108,7 @@ Chaque exemple part de cet état initial, sauf mention contraire (et se termine 
 - ch10 : triggers `trg_employes_bi`, `trg_employes_audit_sal`, `trg_sal_plafond`, vue `v_employes_dept`
 - ch11 : `nb_lignes`, `chercher`, `compter_par_poste`
 - ch12 : package `pkg_log`, table `journal`
-- ch13 : package `pkg_augmentations`
+- ch13 : package `pkg_augmentations`, procédure `prime_fin_annee`
 
 ## Exigences de qualité
 

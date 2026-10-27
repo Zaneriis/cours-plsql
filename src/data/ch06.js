@@ -12,11 +12,11 @@ QUIZ.ch06 = [
   { q: "Une fonction fait un <code>INSERT INTO journal_erreurs</code> et elle est appelée dans un <code>SELECT</code>. Que se passe-t-il ?",
     o: ["L'insertion est faite et validée avec la requête", "ORA-14551: cannot perform a DML operation inside a query",
         "ORA-04091: table is mutating", "PLS-00231 à la compilation"], a: 1,
-    w: "Une fonction appelée depuis une requête ne peut pas faire de DML (ORA-14551), ni de COMMIT (ORA-14552), sauf si elle est déclarée en transaction autonome." },
+    w: "Une fonction appelée depuis une requête ne peut pas faire de DML (ORA-14551), ni de COMMIT, ROLLBACK ou DDL (ORA-14552, aussi levée depuis un ordre DML), sauf si elle est déclarée en transaction autonome." },
   { q: "Quelle option met en commun les résultats d'une fonction entre toutes les sessions ?",
     o: ["DETERMINISTIC", "PRAGMA UDF", "RESULT_CACHE", "NOCOPY"], a: 2,
     w: "RESULT_CACHE stocke les résultats dans la SGA et les invalide quand une table lue est modifiée. DETERMINISTIC n'est qu'une promesse exploitée pendant l'exécution d'une requête." },
-  { q: "Le propriétaire d'une procédure <code>AUTHID DEFINER</code> a le droit <code>SELECT</code> sur une table via un rôle. Résultat ?",
+  { q: "Le propriétaire d'une procédure <code>AUTHID DEFINER</code> a le droit <code>SELECT</code> sur une table via un rôle seulement, et la lit en SQL statique. Résultat ?",
     o: ["Tout fonctionne", "La procédure ne compile pas : ORA-00942", "Elle compile mais échoue à l'exécution", "Seul le propriétaire peut l'exécuter"], a: 1,
     w: "Les privilèges obtenus via un rôle ne comptent pas pour compiler du PL/SQL stocké : il faut un GRANT direct au propriétaire." }
 ];

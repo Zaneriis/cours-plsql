@@ -52,7 +52,7 @@
     /
   </script>
   <p class="prose">Quelques règles de déclaration : un paramètre se type <strong>sans taille</strong> (<code>VARCHAR2</code>, pas <code>VARCHAR2(30)</code>, sinon <code>PLS-00103</code>) ou par ancrage <code>%TYPE</code>, ce qui suit la définition de la colonne. Une fonction dont l'exécution atteint le <code>END</code> sans passer par un <code>RETURN</code> lève <code>ORA-06503: PL/SQL: Function returned without value</code>. Dans une procédure, <code>RETURN;</code> sans valeur sert seulement à sortir immédiatement.</p>
-  <div class="callout tip"><span class="ct">Astuce : CREATE OR REPLACE plutôt que DROP + CREATE</span><p><code>CREATE OR REPLACE</code> conserve les privilèges accordés (<code>GRANT EXECUTE</code>) et les synonymes qui pointent vers l'objet. Un <code>DROP</code> suivi d'un <code>CREATE</code> perd les privilèges. Depuis SQL*Plus ou SQLcl, si la compilation échoue (« Warning: Procedure created with compilation errors »), <code>SHOW ERRORS</code> affiche les erreurs ; elles sont aussi dans la vue <code>USER_ERRORS</code>.</p></div>
+  <div class="callout tip"><span class="ct">Astuce : CREATE OR REPLACE plutôt que DROP + CREATE</span><p><code>CREATE OR REPLACE</code> conserve les privilèges accordés sur l'objet (<code>GRANT EXECUTE</code>). Un <code>DROP</code> suivi d'un <code>CREATE</code> les perd : il faut refaire tous les <code>GRANT</code>. Depuis SQL*Plus ou SQLcl, si la compilation échoue (« Warning: Procedure created with compilation errors »), <code>SHOW ERRORS</code> affiche les erreurs ; elles sont aussi dans la vue <code>USER_ERRORS</code>.</p></div>
 
   <h2>Les modes de paramètres</h2>
   <div class="table-wrap"><table>
@@ -90,7 +90,7 @@ flowchart LR
   <h3>NOCOPY : passer par référence</h3>
   <p class="prose">Recopier une collection de 100 000 éléments à l'entrée et à la sortie coûte cher. L'indication <code>NOCOPY</code> demande au compilateur de passer le paramètre <code>OUT</code> ou <code>IN OUT</code> par référence : <code>p_tab IN OUT NOCOPY t_tab</code>. Deux conséquences :</p>
   <ul class="prose">
-    <li>ce n'est qu'une <strong>indication</strong> : Oracle peut l'ignorer, par exemple si le paramètre formel a une contrainte (<code>NOT NULL</code>, <code>NUMBER(8,2)</code>), si une conversion de type est nécessaire ou si l'appel est distant ;</li>
+    <li>ce n'est qu'une <strong>indication</strong> : Oracle peut l'ignorer, par exemple si la variable passée par l'appelant porte une contrainte (<code>NOT NULL</code>, ou une précision comme <code>NUMBER(8,2)</code>), si une conversion de type implicite est nécessaire, si on passe un élément de tableau associatif plutôt que le tableau entier, ou si l'appel passe par un lien de base de données ;</li>
     <li>si elle est appliquée, la variable de l'appelant est modifiée au fil de l'exécution : en cas d'exception, elle peut rester <strong>à moitié modifiée</strong>.</li>
   </ul>
   <p class="prose">Réserve-la aux grosses collections et aux LOB, là où le gain est mesurable, et ne fais jamais dépendre la logique de l'appelant du fait qu'elle soit appliquée ou non.</p>
@@ -125,7 +125,8 @@ flowchart LR
     <li>être stockée (autonome ou publique dans un package) ou déclarée dans la clause <code>WITH</code> de la requête ;</li>
     <li>n'utiliser que des types SQL en paramètres et retour : pas de record PL/SQL, pas de tableau associatif, pas de <code>BOOLEAN</code> avant 23ai (où <code>BOOLEAN</code> devient un type SQL) ;</li>
     <li>n'avoir que des paramètres <code>IN</code> ;</li>
-    <li>appelée depuis un <code>SELECT</code>, ne faire aucun DML (<code>ORA-14551: cannot perform a DML operation inside a query</code>) ni <code>COMMIT</code>, <code>ROLLBACK</code> ou DDL (<code>ORA-14552</code>), sauf si elle est en transaction autonome (<a href="#ch05">chapitre 05</a>) ;</li>
+    <li>appelée depuis un <code>SELECT</code>, ne faire aucun DML (<code>ORA-14551: cannot perform a DML operation inside a query</code>) ;</li>
+    <li>appelée depuis un <code>SELECT</code> ou depuis un ordre DML, ne faire ni <code>COMMIT</code>, ni <code>ROLLBACK</code>, ni DDL (<code>ORA-14552: cannot perform a DDL, commit or rollback inside a query or DML</code>) ; ces deux interdits tombent si la fonction est en transaction autonome (<a href="#ch05">chapitre 05</a>) ;</li>
     <li>appelée depuis un <code>INSERT</code>, <code>UPDATE</code> ou <code>DELETE</code>, ne pas lire ni modifier la table que cet ordre modifie (table mutante <code>ORA-04091</code>, détaillée au <a href="#ch10">chapitre 10</a>).</li>
   </ul>
   <div class="callout pitfall"><span class="ct">Piège de performance</span><p>Dans la requête ci-dessus, <code>anciennete</code> est appelée pour chaque ligne dans le <code>WHERE</code>, puis de nouveau pour chaque ligne retenue dans le <code>SELECT</code>, et chaque appel exécute un <code>SELECT</code>. Chaque appel est un changement de contexte SQL → PL/SQL, et chaque requête interne un changement PL/SQL → SQL. Sur un million de lignes, c'est catastrophique : écris la logique en SQL pur (<code>TRUNC(MONTHS_BETWEEN(SYSDATE, date_embauche) / 12)</code>), ou fais recevoir à la fonction la date plutôt que l'identifiant.</p></div>
@@ -192,7 +193,7 @@ Leroy.....  4800
 2 lignes</div>
 
   <h3>Déclaration anticipée et récursivité</h3>
-  <p class="prose">Un sous-programme local doit être déclaré avant d'être appelé. Quand deux sous-programmes s'appellent mutuellement, on écrit d'abord la <strong>déclaration anticipée</strong> (<em>forward declaration</em>) de l'un : son en-tête seul, terminé par un point-virgule. Un sous-programme peut aussi s'appeler lui-même (récursivité) : il faut alors une condition d'arrêt, sinon l'exécution finit par une erreur d'épuisement de la mémoire.</p>
+  <p class="prose">Un sous-programme local doit être déclaré avant d'être appelé. Quand deux sous-programmes s'appellent mutuellement, on écrit d'abord la <strong>déclaration anticipée</strong> (<em>forward declaration</em>) de l'un : son en-tête seul, terminé par un point-virgule. Un sous-programme peut aussi s'appeler lui-même (récursivité) : il faut alors une condition d'arrêt, sinon chaque appel empile ses variables locales jusqu'à épuiser la mémoire de la session : PL/SQL lève alors <code>STORAGE_ERROR</code> (<code>ORA-06500</code>), ou le serveur une erreur mémoire comme <code>ORA-04030</code>.</p>
   <script type="text/plsql" data-title="Organigramme par récursivité croisée">
     DECLARE
       PROCEDURE afficher_equipe (p_mgr_id NUMBER, p_niveau PLS_INTEGER);   -- déclaration anticipée
@@ -221,6 +222,7 @@ Leroy.....  4800
     Garcia
   Durand
   Leroy</div>
+  <p class="prose">Dans SQL*Plus, <code>SET SERVEROUTPUT ON</code> supprime les espaces en début de ligne : utilise <code>SET SERVEROUTPUT ON FORMAT WRAPPED</code> pour voir l'indentation (SQL Developer la conserve).</p>
   <p class="prose">Pour un vrai organigramme, une requête hiérarchique (<code>CONNECT BY</code> ou <code>WITH</code> récursif) fait le même travail en un seul ordre SQL, sans une requête par employé. La récursivité PL/SQL reste utile pour parcourir des structures en mémoire (collections, documents JSON).</p>
   <div class="callout tip"><span class="ct">Surcharge locale</span><p>Deux sous-programmes locaux du même bloc peuvent porter le même nom s'ils diffèrent par le nombre ou la famille de types de leurs paramètres, par exemple <code>formater(p_sal NUMBER)</code> et <code>formater(p_date DATE)</code>. C'est impossible pour des procédures autonomes du schéma (un seul objet par nom). Les règles de la surcharge sont détaillées avec les packages au <a href="#ch07">chapitre 07</a>.</p></div>
 
@@ -260,7 +262,7 @@ Leroy.....  4800
     </tbody>
   </table></div>
   <p class="prose">La clause se place dans l'en-tête, avant <code>IS</code> / <code>AS</code> : <code>CREATE OR REPLACE FUNCTION f (…) RETURN NUMBER AUTHID CURRENT_USER IS …</code>. Elle concerne surtout le SQL dynamique, détaillé au <a href="#ch11">chapitre 11</a> : un utilitaire qui compte les lignes d'une table dont le nom est passé en paramètre doit compter celles de la table de l'appelant, pas celles du propriétaire.</p>
-  <div class="callout pitfall"><span class="ct">Piège classique : les rôles</span><p>Les privilèges obtenus via un <strong>rôle</strong> ne servent pas à compiler du PL/SQL stocké, et ne sont jamais actifs dans une unité <code>AUTHID DEFINER</code>. Une requête qui fonctionne dans SQL Developer (grâce à un <code>SELECT</code> obtenu via un rôle) échoue à la compilation de la procédure avec <code>PL/SQL: ORA-00942: table or view does not exist</code>. Solution : accorder le privilège directement au propriétaire (<code>GRANT SELECT ON rh.employes TO appli</code>). Depuis 12c, on peut aussi accorder un rôle à l'unité PL/SQL elle-même (<code>GRANT role TO PROCEDURE …</code>).</p></div>
+  <div class="callout pitfall"><span class="ct">Piège classique : les rôles</span><p>Les privilèges obtenus via un <strong>rôle</strong> ne servent pas à compiler du PL/SQL stocké, et ne sont jamais actifs dans une unité <code>AUTHID DEFINER</code>. Une requête qui fonctionne dans SQL Developer (grâce à un <code>SELECT</code> obtenu via un rôle) échoue à la compilation de la procédure avec <code>PL/SQL: ORA-00942: table or view does not exist</code>. Solution : accorder le privilège directement au propriétaire (<code>GRANT SELECT ON rh.employes TO appli</code>). Depuis 12c, on peut aussi accorder un rôle à l'unité PL/SQL elle-même (<code>GRANT role TO PROCEDURE …</code>), surtout utile en <code>AUTHID CURRENT_USER</code> ; ce rôle n'est actif qu'à l'exécution et ne règle donc pas la compilation du SQL statique.</p></div>
 
   <h2>Exercices</h2>
   <div class="ex" data-ex="ch06-e1">
@@ -336,22 +338,8 @@ Leroy.....  4800
       </details>
     </div>
   </div>
-  <div class="ex" data-ex="ch06-e3">
-    <div class="ex-head"><h4>Exercice 3 · Réécrire pour la performance</h4><span class="lvl l3">difficile</span></div>
-    <div class="ex-body">
-      <p>Un collègue a écrit <code>SELECT e.nom, nom_dept(e.emp_id) FROM employes e</code>, où <code>nom_dept</code> lit l'employé puis son département. La requête est lente sur 2 millions de lignes. Propose au moins trois améliorations, de la meilleure à la moins bonne.</p>
-      <details class="sol"><summary>Voir la solution</summary>
-        <ol>
-          <li><strong>Supprimer la fonction</strong> : une jointure <code>JOIN departements d ON d.dept_id = e.dept_id</code>. Zéro changement de contexte, l'optimiseur choisit le meilleur plan. C'est la réponse attendue.</li>
-          <li>Si la fonction doit rester (règle métier partagée) : lui passer <code>e.dept_id</code> plutôt que <code>emp_id</code> pour supprimer une lecture, et la déclarer <code>RESULT_CACHE</code> comme <code>nom_departement</code> (peu de départements, beaucoup d'appels identiques).</li>
-          <li>L'appeler via une sous-requête scalaire <code>(SELECT nom_departement(e.dept_id) FROM dual)</code> pour profiter du cache de sous-requête scalaire (4 valeurs distinctes, donc 4 appels), et ajouter <code>PRAGMA UDF</code>.</li>
-        </ol>
-        <p class="hint">Ne propose pas <code>DETERMINISTIC</code> ici : la fonction lit une table, son résultat peut changer.</p>
-      </details>
-    </div>
-  </div>
   <div class="ex" data-ex="ch06-e4">
-    <div class="ex-head"><h4>Exercice 4 · Prédire l'affichage</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-head"><h4>Exercice 3 · Prédire l'affichage</h4><span class="lvl l2">moyen</span></div>
     <div class="ex-body">
       <p>Sans l'exécuter, donne les trois lignes affichées par ce bloc.</p>
       <script type="text/plsql" data-title="Énoncé">
@@ -385,6 +373,20 @@ C : 135</div>
       </details>
     </div>
   </div>
+  <div class="ex" data-ex="ch06-e3">
+    <div class="ex-head"><h4>Exercice 4 · Réécrire pour la performance</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Un collègue a écrit <code>SELECT e.nom, nom_dept(e.emp_id) FROM employes e</code>, où <code>nom_dept</code> lit l'employé puis son département. La requête est lente sur 2 millions de lignes. Propose au moins trois améliorations, de la meilleure à la moins bonne.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <ol>
+          <li><strong>Supprimer la fonction</strong> : une jointure <code>JOIN departements d ON d.dept_id = e.dept_id</code>. Zéro changement de contexte, l'optimiseur choisit le meilleur plan. C'est la réponse attendue.</li>
+          <li>Si la fonction doit rester (règle métier partagée) : lui passer <code>e.dept_id</code> plutôt que <code>emp_id</code> pour supprimer une lecture, et la déclarer <code>RESULT_CACHE</code> comme <code>nom_departement</code> (peu de départements, beaucoup d'appels identiques).</li>
+          <li>L'appeler via une sous-requête scalaire <code>(SELECT nom_departement(e.dept_id) FROM dual)</code> pour profiter du cache de sous-requête scalaire (un appel par département distinct, soit une poignée d'appels au lieu de 2 millions), et ajouter <code>PRAGMA UDF</code>.</li>
+        </ol>
+        <p class="hint">Ne propose pas <code>DETERMINISTIC</code> ici : la fonction lit une table, son résultat peut changer.</p>
+      </details>
+    </div>
+  </div>
   <div class="ex" data-ex="ch06-e5">
     <div class="ex-head"><h4>Exercice 5 · Chaîne hiérarchique récursive</h4><span class="lvl l3">difficile</span></div>
     <div class="ex-body">
@@ -414,7 +416,7 @@ C : 135</div>
         <div class="output">Garcia > Petit > Bernard > Martin
 Martin
 ?</div>
-        <p class="hint">En SQL, la même chaîne s'obtient en un seul ordre avec <code>SYS_CONNECT_BY_PATH</code> ou un <code>WITH</code> récursif. Si les données contenaient un cycle (un employé manager de son propre manager), cette fonction bouclerait jusqu'à épuisement de la mémoire : un compteur de profondeur maximale est une bonne protection.</p>
+        <p class="hint">En SQL, la même chaîne s'obtient en un seul ordre avec <code>SYS_CONNECT_BY_PATH</code> ou un <code>WITH</code> récursif. Si les données contenaient un cycle (un employé manager de son propre manager), cette fonction bouclerait jusqu'à épuisement de la mémoire (<code>STORAGE_ERROR</code> ou <code>ORA-04030</code>) : un compteur de profondeur maximale est une bonne protection.</p>
       </details>
     </div>
   </div>
@@ -423,7 +425,7 @@ Martin
   <div data-quiz="ch06"></div>
 
   <h2>Questions d'entretien</h2>
-  <details class="qa"><summary>Peut-on faire un COMMIT dans une fonction ?</summary><div><p>Techniquement oui si elle est appelée depuis PL/SQL, mais c'est une mauvaise pratique : une fonction calcule, elle ne doit pas avoir d'effet de bord, et elle validerait la transaction de l'appelant sans qu'il le sache. Appelée depuis un <code>SELECT</code>, un DML lève <code>ORA-14551</code> et un <code>COMMIT</code> lève <code>ORA-14552</code>. La seule exception est la transaction autonome, réservée à des cas comme la journalisation.</p></div></details>
+  <details class="qa"><summary>Peut-on faire un COMMIT dans une fonction ?</summary><div><p>Techniquement oui si elle est appelée depuis PL/SQL, mais c'est une mauvaise pratique : une fonction calcule, elle ne doit pas avoir d'effet de bord, et elle validerait la transaction de l'appelant sans qu'il le sache. Appelée depuis un <code>SELECT</code>, un DML lève <code>ORA-14551</code> ; appelée depuis un <code>SELECT</code> ou un ordre DML, un <code>COMMIT</code> lève <code>ORA-14552</code>. La seule exception est la transaction autonome, réservée à des cas comme la journalisation.</p></div></details>
   <details class="qa"><summary>Que devient un paramètre OUT si la procédure lève une exception ?</summary><div><p>Sans <code>NOCOPY</code>, rien n'est recopié : la variable de l'appelant garde sa valeur d'avant l'appel, même si la procédure avait déjà affecté le paramètre. Avec <code>NOCOPY</code>, le passage peut se faire par référence et la variable peut rester partiellement modifiée ; comme <code>NOCOPY</code> n'est qu'une indication, l'appelant ne doit compter sur aucun des deux comportements.</p></div></details>
   <details class="qa"><summary>Différence entre DETERMINISTIC et RESULT_CACHE ?</summary><div><p><code>DETERMINISTIC</code> est une promesse faite à Oracle que la fonction renvoie toujours la même chose pour les mêmes entrées ; Oracle ne la vérifie pas, le bénéfice se limite à l'exécution de la requête dans la session, et c'est requis pour un index sur fonction. <code>RESULT_CACHE</code> stocke réellement les résultats dans la SGA, les partage entre sessions et les invalide quand les tables lues sont modifiées et validées : il convient à une fonction qui lit des données rarement modifiées.</p></div></details>
   <details class="qa"><summary>Ma procédure ne compile pas (ORA-00942) alors que la requête marche dans SQL Developer. Pourquoi ?</summary><div><p>Le privilège sur la table est obtenu via un rôle. Les rôles ne sont pas pris en compte pour compiler du PL/SQL stocké ni à l'exécution d'une unité <code>AUTHID DEFINER</code>. Il faut un <code>GRANT</code> direct au propriétaire de la procédure. En <code>AUTHID CURRENT_USER</code>, les rôles de l'appelant sont actifs à l'exécution, mais la compilation demande toujours des privilèges directs (ou du SQL dynamique).</p></div></details>

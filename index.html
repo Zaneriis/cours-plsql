@@ -418,7 +418,7 @@ flowchart LR
     </pre>
     <p class="cap">Un seul aller-retour réseau pour tout le bloc, mais un changement de contexte à chaque ordre SQL.</p>
   </div>
-  <p class="prose">Le SQL écrit directement dans le code (SQL <strong>statique</strong>) est vérifié dès la compilation : si une colonne n'existe pas, le bloc ne compile pas. En contrepartie, seuls (pour l'essentiel) les ordres <strong>DML</strong> (<code>SELECT … INTO</code>, <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>MERGE</code>) et de contrôle de transaction (<code>COMMIT</code>, <code>ROLLBACK</code>, <code>SAVEPOINT</code>) s'écrivent tels quels. Le détail du SQL dans PL/SQL est au <a href="#ch04">chapitre 04</a>.</p>
+  <p class="prose">Le SQL écrit directement dans le code (SQL <strong>statique</strong>) est vérifié dès la compilation : si une colonne n'existe pas, le bloc ne compile pas. Pour l'essentiel, seuls les ordres <strong>DML</strong> (<code>SELECT … INTO</code>, <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>MERGE</code>) et de contrôle de transaction (<code>COMMIT</code>, <code>ROLLBACK</code>, <code>SAVEPOINT</code>) s'écrivent tels quels. Le détail du SQL dans PL/SQL est au <a href="#ch04">chapitre 04</a>.</p>
   <div class="callout pitfall"><span class="ct">Piège : ce que le moteur PL/SQL refuse</span>
     <ul>
       <li>Un <code>SELECT</code> sans <code>INTO</code> (ni curseur) : <code>PLS-00428: an INTO clause is expected in this SELECT statement</code>. Un bloc PL/SQL n'affiche pas de résultat de requête tout seul.</li>
@@ -537,7 +537,7 @@ flowchart LR
   <div class="output">ORA-06550: line 4, column 3:
 PLS-00428: an INTO clause is expected in this SELECT statement</div>
   <p class="prose hint">Les sorties de ce chapitre suivent le format 19c. En 23ai, chaque message est en plus suivi d'une ligne <code>Help: https://docs.oracle.com/error-help/db/…</code>.</p>
-  <div class="callout pitfall"><span class="ct">Piège</span><p>Une erreur SQL détectée <strong>à la compilation</strong> apparaît sous la forme <code>PL/SQL: ORA-00942: table or view does not exist</code> (suivie de <code>PL/SQL: SQL Statement ignored</code>) : le préfixe est <code>ORA-</code>, mais c'est bien une erreur de compilation. Le cas classique : la table est accessible via un <strong>rôle</strong>, ce qui suffit dans un bloc anonyme mais pas dans une procédure stockée (<a href="#ch06">chapitre 06</a>, <code>AUTHID</code>).</p></div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Une erreur SQL détectée <strong>à la compilation</strong> apparaît sous la forme <code>PL/SQL: ORA-00942: table or view does not exist</code> (suivie de <code>PL/SQL: SQL Statement ignored</code>) : le préfixe est <code>ORA-</code>, mais c'est bien une erreur de compilation. Le cas classique : la table est accessible via un <strong>rôle</strong>, ce qui suffit dans un bloc anonyme mais pas pour compiler une procédure stockée, quel que soit son <code>AUTHID</code> (<a href="#ch06">chapitre 06</a>).</p></div>
   <p class="prose">Les avertissements s'activent par session, puis s'appliquent aux unités compilées ensuite :</p>
   <script type="text/plsql" data-title="Activer les avertissements du compilateur">
     ALTER SESSION SET PLSQL_WARNINGS = 'ENABLE:ALL';
@@ -626,7 +626,7 @@ flowchart LR
     <p class="cap">Le cycle de vie d'une unité stockée face aux modifications de ce dont elle dépend.</p>
   </div>
   <ul class="prose">
-    <li>Depuis 11g, les dépendances sont suivies <strong>finement</strong> (au niveau des éléments utilisés) : ajouter une colonne à <code>employes</code> n'invalide pas une procédure qui ne cite que <code>nom</code> et <code>salaire</code>. Une unité qui utilise <code>employes%ROWTYPE</code> ou <code>SELECT *</code> dépend de la structure complète et peut, elle, être invalidée.</li>
+    <li>Depuis 11g, les dépendances sont suivies <strong>finement</strong> (au niveau des éléments utilisés) : ajouter une colonne à <code>employes</code> n'invalide pas une procédure qui ne cite que <code>nom</code> et <code>salaire</code>. Une unité qui utilise <code>employes%ROWTYPE</code> ou <code>SELECT *</code> dépend de la structure complète : elle est invalidée, comme une unité qui fait un <code>INSERT</code> sans liste de colonnes. La recompilation automatique au prochain appel la remet en général d'aplomb.</li>
     <li>Supprimer ou modifier une colonne utilisée, ou changer la signature d'une procédure appelée, invalide les dépendants. Si la colonne a disparu, la recompilation échoue.</li>
     <li>Les appelants d'un package ne dépendent que de sa <strong>spécification</strong> : recompiler le corps ne les invalide pas (<a href="#ch07">chapitre 07</a>).</li>
   </ul>
@@ -653,8 +653,8 @@ flowchart LR
     <tbody>
       <tr><td>Rien ne s'affiche pendant l'exécution</td><td>Un traitement de 10 minutes affiche tout à la fin. Pour suivre l'avancement en direct : <code>DBMS_APPLICATION_INFO</code> ou une table de log (<a href="#ch12">chapitre 12</a>).</td></tr>
       <tr><td>Taille d'une ligne : 32 767 octets maximum</td><td>Au-delà : <code>ORA-20000: ORU-10028: line length overflow, limit of 32767 bytes per line</code>.</td></tr>
-      <tr><td>Taille du tampon</td><td><code>DBMS_OUTPUT.ENABLE</code> sans argument réserve 20 000 octets ; <code>ENABLE(NULL)</code> ou <code>SET SERVEROUTPUT ON SIZE UNLIMITED</code> lève la limite. Sinon : <code>ORA-20000: ORU-10027: buffer overflow, limit of 20000 bytes</code>.</td></tr>
-      <tr><td>Paramètre de type <code>VARCHAR2</code></td><td>Les nombres et dates sont convertis implicitement, mais pas un <code>BOOLEAN</code> en 19c : <code>PLS-00306</code>. Convertis-le d'abord (<a href="#ch02">chapitre 02</a>).</td></tr>
+      <tr><td>Taille du tampon</td><td><code>DBMS_OUTPUT.ENABLE</code> sans argument réserve 20 000 octets ; <code>ENABLE(NULL)</code> ou <code>SET SERVEROUTPUT ON SIZE UNLIMITED</code> lève la limite (dans SQL*Plus récent, <code>SET SERVEROUTPUT ON</code> seul vaut déjà <code>UNLIMITED</code>). Si une limite est fixée et dépassée : <code>ORA-20000: ORU-10027: buffer overflow, limit of 20000 bytes</code>.</td></tr>
+      <tr><td>Paramètre de type <code>VARCHAR2</code></td><td>Les nombres et dates sont convertis implicitement, mais pas un <code>BOOLEAN</code> : <code>PLS-00306: wrong number or types of arguments in call to 'PUT_LINE'</code> en 19c. Même en 23ai, ne compte pas sur une conversion implicite : convertis-le d'abord (<a href="#ch02">chapitre 02</a>).</td></tr>
       <tr><td>Personne ne lit le tampon côté application</td><td>Appelé depuis Java ou un batch, le texte est simplement perdu. Ce n'est pas un outil de journalisation de production.</td></tr>
     </tbody>
   </table></div>
@@ -828,7 +828,7 @@ C=3</div>
   <details class="qa"><summary>Qu'est-ce qu'un bloc anonyme ? Quand l'utiliser ?</summary><div><p>Un bloc sans nom, non stocké dans le dictionnaire, compilé à chaque envoi. On l'utilise pour des scripts ponctuels (migration de données, test, administration). Pour du code appelé régulièrement ou partagé, on crée une procédure, une fonction ou mieux un package : compilé une fois, protégé par des droits (<code>GRANT EXECUTE</code>), suivi par les dépendances.</p></div></details>
   <details class="qa"><summary>Quelle différence entre une erreur PLS- et une erreur ORA- ? Que signifie ORA-06550 ?</summary><div><p>Une erreur <code>PLS-</code> est une erreur de compilation PL/SQL (syntaxe, identifiant inconnu, mauvais arguments) : le code ne s'exécute pas et aucune section <code>EXCEPTION</code> ne peut l'intercepter. Une erreur <code>ORA-</code> vient du serveur, le plus souvent à l'exécution (aucune ligne, trop de lignes, valeur invalide), et peut être traitée dans <code>EXCEPTION</code>. <code>ORA-06550</code> signale qu'un bloc anonyme n'a pas compilé : elle indique la ligne et la colonne, et est suivie de l'erreur <code>PLS-</code> réelle. Exception notable : une erreur SQL détectée à la compilation, comme <code>PL/SQL: ORA-00942</code>, porte le préfixe ORA-.</p></div></details>
   <details class="qa"><summary>Que se passe-t-il quand on modifie une table utilisée par une procédure ?</summary><div><p>Selon la modification, la procédure peut passer à l'état <code>INVALID</code>. Depuis 11g, le suivi fin des dépendances évite les invalidations inutiles (ajouter une colonne non utilisée, par exemple). Oracle recompile automatiquement l'unité au prochain appel ; si la recompilation échoue (colonne supprimée), l'appel lève une erreur, par exemple <code>PLS-00905: object … is invalid</code>. On vérifie avec <code>USER_OBJECTS.STATUS</code>, on lit les erreurs dans <code>USER_ERRORS</code> et on recompile avec <code>ALTER PROCEDURE … COMPILE</code> ou <code>DBMS_UTILITY.COMPILE_SCHEMA</code>. Pour limiter les cascades, on passe par des packages : les appelants ne dépendent que de la spécification.</p></div></details>
-  <details class="qa"><summary>Pourquoi ne pas utiliser DBMS_OUTPUT pour tracer un traitement en production ?</summary><div><p>Parce que <code>DBMS_OUTPUT</code> écrit dans un tampon en mémoire de la session, que seul un client qui le demande lit, et seulement à la fin de l'appel. Une application Java ne le lit pas : les traces sont perdues. Le tampon est limité (20 000 octets par défaut, <code>ORU-10027</code>), rien n'est visible pendant un long traitement, et rien n'est conservé une fois la session terminée. En production, on écrit dans une table de log via une transaction autonome (<a href="#ch05">chapitre 05</a>, <a href="#ch12">chapitre 12</a>) et on suit l'avancement avec <code>DBMS_APPLICATION_INFO</code>.</p></div></details>
+  <details class="qa"><summary>Pourquoi ne pas utiliser DBMS_OUTPUT pour tracer un traitement en production ?</summary><div><p>Parce que <code>DBMS_OUTPUT</code> écrit dans un tampon en mémoire de la session, que seul un client qui le demande lit, et seulement à la fin de l'appel. Une application Java ne le lit pas : les traces sont perdues. Le tampon peut être limité (20 000 octets avec <code>DBMS_OUTPUT.ENABLE</code> sans argument, <code>ORU-10027</code>), rien n'est visible pendant un long traitement, et rien n'est conservé une fois la session terminée. En production, on écrit dans une table de log via une transaction autonome (<a href="#ch05">chapitre 05</a>, <a href="#ch12">chapitre 12</a>) et on suit l'avancement avec <code>DBMS_APPLICATION_INFO</code>.</p></div></details>
 </section>
 
 <!-- ===================================================== CH 02 ===================================================== -->
@@ -868,7 +868,7 @@ C=3</div>
     <thead><tr><th>Type</th><th>À retenir</th></tr></thead>
     <tbody>
       <tr><td><code>NUMBER(p,s)</code></td><td>Décimal exact, précision <code>p</code> jusqu'à 38 chiffres significatifs, <code>s</code> chiffres après la virgule. Type de référence pour les montants. Trop de décimales : arrondi silencieux (<code>NUMBER(8,2)</code> reçoit 3.456, stocke 3.46). Trop de chiffres avant la virgule : <code>ORA-06502</code> en PL/SQL (<code>ORA-01438</code> dans un <code>INSERT</code>).</td></tr>
-      <tr><td><code>PLS_INTEGER</code></td><td>Entier signé 32 bits (±2 147 483 647), plus rapide que <code>NUMBER</code> pour compteurs et indices. Dépassement : <code>ORA-01426: numeric overflow</code>. <code>BINARY_INTEGER</code> est un synonyme depuis 10g. Une valeur décimale affectée est <em>arrondie</em>.</td></tr>
+      <tr><td><code>PLS_INTEGER</code></td><td>Entier signé 32 bits (de -2 147 483 648 à 2 147 483 647), plus rapide que <code>NUMBER</code> pour compteurs et indices. Dépassement : <code>ORA-01426: numeric overflow</code>. <code>BINARY_INTEGER</code> est un synonyme depuis 10g. Une valeur décimale affectée est <em>arrondie</em>.</td></tr>
       <tr><td><code>SIMPLE_INTEGER</code></td><td>(11g) Sous-type de <code>PLS_INTEGER</code>, <code>NOT NULL</code> (valeur initiale obligatoire) et sans contrôle de dépassement : la valeur « boucle » au lieu de lever une erreur. Gain surtout en compilation native.</td></tr>
       <tr><td><code>VARCHAR2(n)</code></td><td>Chaîne de longueur variable, <code>n</code> obligatoire. Jusqu'à 32 767 octets en PL/SQL, mais 4 000 en colonne SQL (32 767 si <code>MAX_STRING_SIZE = EXTENDED</code>, 12c). Par défaut <code>n</code> compte des <strong>octets</strong> : écris <code>VARCHAR2(50 CHAR)</code> pour compter en caractères (un « é » occupe 2 octets en AL32UTF8).</td></tr>
       <tr><td><code>CHAR(n)</code></td><td>Longueur fixe, complétée par des espaces. À éviter : source de comparaisons surprenantes avec un <code>VARCHAR2</code>.</td></tr>
@@ -948,9 +948,9 @@ C=3</div>
       DBMS_OUTPUT.PUT_LINE('Mois écoulés    : ' || MONTHS_BETWEEN(l_ref, l_emb));
       DBMS_OUTPUT.PUT_LINE('Fin 6 mois      : ' || TO_CHAR(ADD_MONTHS(l_emb, 6) - 1, 'DD/MM/YYYY'));
       DBMS_OUTPUT.PUT_LINE('31/01 + 1 mois  : ' || TO_CHAR(ADD_MONTHS(DATE '2024-01-31', 1), 'DD/MM/YYYY'));
-      l_duree := l_t2 - l_t1;
-      DBMS_OUTPUT.PUT_LINE('Durée           : ' || l_duree);
-      DBMS_OUTPUT.PUT_LINE('Heures (EXTRACT): ' || EXTRACT(HOUR FROM l_duree));
+      l_duree := l_t2 - l_t1;                                 -- 1 jour, 1 h 30 min 15 s
+      DBMS_OUTPUT.PUT_LINE('Durée           : ' || EXTRACT(DAY FROM l_duree) || ' j '
+        || EXTRACT(HOUR FROM l_duree) || ' h ' || EXTRACT(MINUTE FROM l_duree) || ' min');
     END;
     /
   </script>
@@ -959,15 +959,15 @@ Plus 36 heures  : 02/09/2024 12:00
 Mois écoulés    : 4
 Fin 6 mois      : 28/02/2025
 31/01 + 1 mois  : 29/02/2024
-Durée           : +01 01:30:15
-Heures (EXTRACT): 1</div>
+Durée           : 1 j 1 h 30 min</div>
+  <p class="prose hint">Pour exploiter un <code>INTERVAL</code>, extrais ses composantes avec <code>EXTRACT(DAY | HOUR | MINUTE | SECOND FROM …)</code> : tu obtiens des nombres, indépendants du format d'affichage. Affiché tel quel, un <code>INTERVAL DAY TO SECOND</code> donne une chaîne du type <code>+01 01:30:15</code>, dont le nombre de chiffres dépend de la précision.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Fonction</th><th>Renvoie</th><th>À retenir</th></tr></thead>
     <tbody>
       <tr><td><code>SYSDATE</code> / <code>SYSTIMESTAMP</code></td><td><code>DATE</code> / <code>TIMESTAMP WITH TIME ZONE</code></td><td>Heure du <strong>serveur</strong> (système d'exploitation de la base).</td></tr>
       <tr><td><code>CURRENT_DATE</code> / <code>CURRENT_TIMESTAMP</code></td><td>idem</td><td>Heure dans le fuseau de la <strong>session</strong>.</td></tr>
       <tr><td><code>ADD_MONTHS(d, n)</code></td><td><code>DATE</code></td><td>Si <code>d</code> est le dernier jour du mois, le résultat aussi (31/01 + 1 mois = 29/02 en 2024).</td></tr>
-      <tr><td><code>MONTHS_BETWEEN(d2, d1)</code></td><td><code>NUMBER</code></td><td>Décimal sauf si les deux dates ont le même jour du mois (ou sont deux fins de mois). Ordre des arguments : le plus récent d'abord.</td></tr>
+      <tr><td><code>MONTHS_BETWEEN(d2, d1)</code></td><td><code>NUMBER</code></td><td>Décimal sauf si les deux dates ont le même jour du mois (ou sont deux fins de mois). Ordre des arguments : le plus récent d'abord pour obtenir un résultat positif.</td></tr>
       <tr><td><code>TRUNC(d)</code>, <code>TRUNC(d, 'MM')</code>, <code>LAST_DAY(d)</code></td><td><code>DATE</code></td><td>Minuit du jour, premier du mois, dernier jour du mois.</td></tr>
     </tbody>
   </table></div>
@@ -1014,7 +1014,7 @@ prime : inconnu</div>
       <tr><td><code>NULL OR FALSE</code></td><td><code>NULL</code></td><td>Le résultat dépend de l'inconnue.</td></tr>
       <tr><td><code>NOT NULL</code> (la valeur)</td><td><code>NULL</code></td><td>L'inverse d'un inconnu reste inconnu.</td></tr>
       <tr><td><code>CASE x WHEN NULL THEN …</code></td><td>jamais choisi</td><td>Le <code>CASE</code> simple compare avec <code>=</code>. Écrire <code>CASE WHEN x IS NULL THEN …</code>.</td></tr>
-      <tr><td><code>x NOT IN (1, NULL)</code></td><td><code>NULL</code> (jamais vrai)</td><td>Piège SQL classique : un <code>NOT IN</code> sur une sous-requête qui renvoie un NULL ne ramène aucune ligne. Préférer <code>NOT EXISTS</code>.</td></tr>
+      <tr><td><code>x NOT IN (1, NULL)</code></td><td><code>NULL</code> ou <code>FALSE</code>, jamais <code>TRUE</code></td><td>Piège SQL classique : un <code>NOT IN</code> sur une sous-requête qui renvoie un NULL ne ramène aucune ligne. Préférer <code>NOT EXISTS</code>.</td></tr>
     </tbody>
   </table></div>
   <div data-stepper="null-if"></div>
@@ -1199,7 +1199,7 @@ Jours jusqu'au 31/12/2022 : 89</div>
   <h2>Questions d'entretien</h2>
   <details class="qa"><summary>Différence entre VARCHAR2 et CHAR ?</summary><div><p><code>CHAR(n)</code> a une longueur fixe et complète avec des espaces ; <code>VARCHAR2(n)</code> stocke la longueur réelle. Avec <code>CHAR</code>, comparer à une variable <code>VARCHAR2</code> peut échouer à cause des espaces de remplissage. On utilise <code>VARCHAR2</code> sauf cas très particulier. Bonus : la longueur est en octets par défaut, <code>VARCHAR2(n CHAR)</code> la compte en caractères.</p></div></details>
   <details class="qa"><summary>Différence entre NVL et COALESCE ?</summary><div><p><code>NVL(a, b)</code> prend exactement deux arguments et évalue toujours les deux ; si les types diffèrent, il convertit <code>b</code> dans le type de <code>a</code>. <code>COALESCE(a, b, c…)</code> accepte une liste, renvoie la première valeur non nulle et s'arrête dès qu'il la trouve (évaluation en court-circuit, utile si <code>b</code> est un appel de fonction coûteux). Il exige des types compatibles et fait partie du standard SQL ANSI.</p></div></details>
-  <details class="qa"><summary>Pourquoi PLS_INTEGER plutôt que NUMBER pour un compteur ?</summary><div><p><code>PLS_INTEGER</code> utilise l'arithmétique native du processeur alors que <code>NUMBER</code> est une représentation décimale logicielle. Le gain est réel dans les boucles serrées. En contrepartie, la plage est limitée à ±2 147 483 647 (au-delà : <code>ORA-01426</code>) et une valeur décimale est arrondie. <code>SIMPLE_INTEGER</code> va plus loin (pas de NULL, pas de contrôle de dépassement).</p></div></details>
+  <details class="qa"><summary>Pourquoi PLS_INTEGER plutôt que NUMBER pour un compteur ?</summary><div><p><code>PLS_INTEGER</code> utilise l'arithmétique native du processeur alors que <code>NUMBER</code> est une représentation décimale logicielle. Le gain est réel dans les boucles serrées. En contrepartie, la plage est limitée à 32 bits signés (de -2 147 483 648 à 2 147 483 647) (au-delà : <code>ORA-01426</code>) et une valeur décimale est arrondie. <code>SIMPLE_INTEGER</code> va plus loin (pas de NULL, pas de contrôle de dépassement).</p></div></details>
   <details class="qa"><summary>DATE ou TIMESTAMP : lequel choisir ?</summary><div><p>Les deux contiennent date et heure. <code>DATE</code> s'arrête à la seconde, n'a pas de fuseau, et la soustraction de deux dates donne un nombre de jours. <code>TIMESTAMP</code> ajoute les fractions de seconde (et le fuseau avec <code>WITH TIME ZONE</code>) ; la soustraction donne un <code>INTERVAL DAY TO SECOND</code>. On prend <code>DATE</code> pour une date métier (embauche, échéance) et <code>TIMESTAMP</code> pour un horodatage technique (journal, ordre d'événements rapprochés, données multi-fuseaux). Dans les deux cas, attention à l'heure cachée lors des comparaisons d'égalité.</p></div></details>
   <details class="qa"><summary>Comment détecter qu'une valeur a changé quand elle peut être NULL ?</summary><div><p><code>l_ancien != l_nouveau</code> vaut NULL dès qu'un des deux est NULL, donc le passage de NULL à 500 passe inaperçu. Il faut traiter les cas NULL explicitement : <code>l_ancien != l_nouveau OR (l_ancien IS NULL AND l_nouveau IS NOT NULL) OR (l_ancien IS NOT NULL AND l_nouveau IS NULL)</code>. En SQL, <code>DECODE(a, b, 0, 1) = 1</code> fait la même chose car <code>DECODE</code> considère deux NULL comme égaux, mais il n'est pas disponible directement en PL/SQL. Cas typique : un trigger d'audit (<a href="#ch10">chapitre 10</a>).</p></div></details>
 </section>
@@ -1401,7 +1401,7 @@ REVERSE 1</div>
   <h3>Ce qu'il faut savoir sur FOR</h3>
   <ul class="prose">
     <li>L'indice est déclaré implicitement en <code>PLS_INTEGER</code>, n'existe que dans la boucle et est <strong>en lecture seule</strong> : <code>j := 5</code> provoque <code>PLS-00363</code> à la compilation.</li>
-    <li>Les bornes sont évaluées <strong>une seule fois</strong> à l'entrée (et arrondies à l'entier le plus proche si besoin) : modifier la variable de borne dans la boucle ne change pas le nombre de tours.</li>
+    <li>Les bornes sont évaluées <strong>une seule fois</strong> à l'entrée et converties en <code>PLS_INTEGER</code>, donc arrondies à l'entier le plus proche si ce ne sont pas des entiers (<code>FOR i IN 1 .. 2.5</code> fait 3 tours) : modifier la variable de borne dans la boucle ne change pas le nombre de tours.</li>
     <li>Si la borne basse dépasse la borne haute (<code>FOR i IN 5 .. 1</code>), la boucle ne s'exécute pas du tout, sans erreur. Pour descendre : <code>REVERSE 1 .. 5</code> (la borne basse reste à gauche).</li>
     <li>Si une variable porte déjà le nom de l'indice, l'indice la <strong>masque</strong> dans la boucle sans la modifier. Après la boucle, on retrouve l'ancienne valeur.</li>
   </ul>
@@ -1422,7 +1422,7 @@ REVERSE 1</div>
 tour 2
 tour 3
 i = 99, l_fin = 10</div>
-  <p class="prose">Le pas est toujours de 1 jusqu'en 19c. Depuis <strong>21c</strong> (donc en 23ai), la clause <code>BY</code> fixe un pas, et d'autres contrôles d'itération sont apparus (plusieurs plages séparées par des virgules, filtre <code>WHEN</code>, parcours de collection avec <code>VALUES OF</code> / <code>INDICES OF</code>). En 19c, on calcule la valeur à partir de l'indice.</p>
+  <p class="prose">Le pas est toujours de 1 jusqu'en 19c. Depuis <strong>21c</strong> (donc en 23ai), la clause <code>BY</code> fixe un pas strictement positif (<code>FOR i IN 1 .. 10 BY 3</code>, la borne haute reste une limite et n'est pas forcément atteinte), et d'autres contrôles d'itération sont apparus (plusieurs plages séparées par des virgules, filtre <code>WHEN</code>, parcours de collection avec <code>VALUES OF</code> / <code>INDICES OF</code>). En 19c, on calcule la valeur à partir de l'indice.</p>
   <script type="text/plsql" data-title="Un pas de 3, avant et depuis 21c">
     BEGIN
       FOR i IN 1 .. 10 BY 3 LOOP      -- 21c et plus : 1, 4, 7, 10
@@ -1584,7 +1584,7 @@ i = 99, l_fin = 10</div>
           /
         </script>
         <div class="output">15 ans : 4442 (cible 4320)</div>
-        <p class="hint">Deux pièges. Si le taux valait 1 (ou moins), la condition resterait vraie pour toujours : d'où le garde-fou. Et si la cible était <code>NULL</code> (un département sans employé, comme le 40, donne <code>AVG = NULL</code>), <code>l_sal &lt; NULL</code> vaut NULL : aucun tour, et le programme afficherait « 0 ans » sans erreur. Un test <code>IF l_cible IS NULL</code> avant la boucle s'impose.</p>
+        <p class="hint">Deux pièges. Si le taux valait 1 (ou moins), ou si l'arrondi annulait l'augmentation (un taux de 1,0001 sur 1400 redonne 1400), la condition resterait vraie pour toujours : d'où le garde-fou. Et si la cible était <code>NULL</code> (un département sans employé, comme le 40, donne <code>AVG = NULL</code>), <code>l_sal &lt; NULL</code> vaut NULL : aucun tour, et le programme afficherait « 0 ans » sans erreur. Un test <code>IF l_cible IS NULL</code> avant la boucle s'impose.</p>
       </details>
     </div>
   </div>
@@ -2593,7 +2593,7 @@ Erreur ignorée : -2290</div>
     /
   </script>
   <p class="prose">Quelques règles de déclaration : un paramètre se type <strong>sans taille</strong> (<code>VARCHAR2</code>, pas <code>VARCHAR2(30)</code>, sinon <code>PLS-00103</code>) ou par ancrage <code>%TYPE</code>, ce qui suit la définition de la colonne. Une fonction dont l'exécution atteint le <code>END</code> sans passer par un <code>RETURN</code> lève <code>ORA-06503: PL/SQL: Function returned without value</code>. Dans une procédure, <code>RETURN;</code> sans valeur sert seulement à sortir immédiatement.</p>
-  <div class="callout tip"><span class="ct">Astuce : CREATE OR REPLACE plutôt que DROP + CREATE</span><p><code>CREATE OR REPLACE</code> conserve les privilèges accordés (<code>GRANT EXECUTE</code>) et les synonymes qui pointent vers l'objet. Un <code>DROP</code> suivi d'un <code>CREATE</code> perd les privilèges. Depuis SQL*Plus ou SQLcl, si la compilation échoue (« Warning: Procedure created with compilation errors »), <code>SHOW ERRORS</code> affiche les erreurs ; elles sont aussi dans la vue <code>USER_ERRORS</code>.</p></div>
+  <div class="callout tip"><span class="ct">Astuce : CREATE OR REPLACE plutôt que DROP + CREATE</span><p><code>CREATE OR REPLACE</code> conserve les privilèges accordés sur l'objet (<code>GRANT EXECUTE</code>). Un <code>DROP</code> suivi d'un <code>CREATE</code> les perd : il faut refaire tous les <code>GRANT</code>. Depuis SQL*Plus ou SQLcl, si la compilation échoue (« Warning: Procedure created with compilation errors »), <code>SHOW ERRORS</code> affiche les erreurs ; elles sont aussi dans la vue <code>USER_ERRORS</code>.</p></div>
 
   <h2>Les modes de paramètres</h2>
   <div class="table-wrap"><table>
@@ -2631,7 +2631,7 @@ flowchart LR
   <h3>NOCOPY : passer par référence</h3>
   <p class="prose">Recopier une collection de 100 000 éléments à l'entrée et à la sortie coûte cher. L'indication <code>NOCOPY</code> demande au compilateur de passer le paramètre <code>OUT</code> ou <code>IN OUT</code> par référence : <code>p_tab IN OUT NOCOPY t_tab</code>. Deux conséquences :</p>
   <ul class="prose">
-    <li>ce n'est qu'une <strong>indication</strong> : Oracle peut l'ignorer, par exemple si le paramètre formel a une contrainte (<code>NOT NULL</code>, <code>NUMBER(8,2)</code>), si une conversion de type est nécessaire ou si l'appel est distant ;</li>
+    <li>ce n'est qu'une <strong>indication</strong> : Oracle peut l'ignorer, par exemple si la variable passée par l'appelant porte une contrainte (<code>NOT NULL</code>, ou une précision comme <code>NUMBER(8,2)</code>), si une conversion de type implicite est nécessaire, si on passe un élément de tableau associatif plutôt que le tableau entier, ou si l'appel passe par un lien de base de données ;</li>
     <li>si elle est appliquée, la variable de l'appelant est modifiée au fil de l'exécution : en cas d'exception, elle peut rester <strong>à moitié modifiée</strong>.</li>
   </ul>
   <p class="prose">Réserve-la aux grosses collections et aux LOB, là où le gain est mesurable, et ne fais jamais dépendre la logique de l'appelant du fait qu'elle soit appliquée ou non.</p>
@@ -2666,7 +2666,8 @@ flowchart LR
     <li>être stockée (autonome ou publique dans un package) ou déclarée dans la clause <code>WITH</code> de la requête ;</li>
     <li>n'utiliser que des types SQL en paramètres et retour : pas de record PL/SQL, pas de tableau associatif, pas de <code>BOOLEAN</code> avant 23ai (où <code>BOOLEAN</code> devient un type SQL) ;</li>
     <li>n'avoir que des paramètres <code>IN</code> ;</li>
-    <li>appelée depuis un <code>SELECT</code>, ne faire aucun DML (<code>ORA-14551: cannot perform a DML operation inside a query</code>) ni <code>COMMIT</code>, <code>ROLLBACK</code> ou DDL (<code>ORA-14552</code>), sauf si elle est en transaction autonome (<a href="#ch05">chapitre 05</a>) ;</li>
+    <li>appelée depuis un <code>SELECT</code>, ne faire aucun DML (<code>ORA-14551: cannot perform a DML operation inside a query</code>) ;</li>
+    <li>appelée depuis un <code>SELECT</code> ou depuis un ordre DML, ne faire ni <code>COMMIT</code>, ni <code>ROLLBACK</code>, ni DDL (<code>ORA-14552: cannot perform a DDL, commit or rollback inside a query or DML</code>) ; ces deux interdits tombent si la fonction est en transaction autonome (<a href="#ch05">chapitre 05</a>) ;</li>
     <li>appelée depuis un <code>INSERT</code>, <code>UPDATE</code> ou <code>DELETE</code>, ne pas lire ni modifier la table que cet ordre modifie (table mutante <code>ORA-04091</code>, détaillée au <a href="#ch10">chapitre 10</a>).</li>
   </ul>
   <div class="callout pitfall"><span class="ct">Piège de performance</span><p>Dans la requête ci-dessus, <code>anciennete</code> est appelée pour chaque ligne dans le <code>WHERE</code>, puis de nouveau pour chaque ligne retenue dans le <code>SELECT</code>, et chaque appel exécute un <code>SELECT</code>. Chaque appel est un changement de contexte SQL → PL/SQL, et chaque requête interne un changement PL/SQL → SQL. Sur un million de lignes, c'est catastrophique : écris la logique en SQL pur (<code>TRUNC(MONTHS_BETWEEN(SYSDATE, date_embauche) / 12)</code>), ou fais recevoir à la fonction la date plutôt que l'identifiant.</p></div>
@@ -2733,7 +2734,7 @@ Leroy.....  4800
 2 lignes</div>
 
   <h3>Déclaration anticipée et récursivité</h3>
-  <p class="prose">Un sous-programme local doit être déclaré avant d'être appelé. Quand deux sous-programmes s'appellent mutuellement, on écrit d'abord la <strong>déclaration anticipée</strong> (<em>forward declaration</em>) de l'un : son en-tête seul, terminé par un point-virgule. Un sous-programme peut aussi s'appeler lui-même (récursivité) : il faut alors une condition d'arrêt, sinon l'exécution finit par une erreur d'épuisement de la mémoire.</p>
+  <p class="prose">Un sous-programme local doit être déclaré avant d'être appelé. Quand deux sous-programmes s'appellent mutuellement, on écrit d'abord la <strong>déclaration anticipée</strong> (<em>forward declaration</em>) de l'un : son en-tête seul, terminé par un point-virgule. Un sous-programme peut aussi s'appeler lui-même (récursivité) : il faut alors une condition d'arrêt, sinon chaque appel empile ses variables locales jusqu'à épuiser la mémoire de la session : PL/SQL lève alors <code>STORAGE_ERROR</code> (<code>ORA-06500</code>), ou le serveur une erreur mémoire comme <code>ORA-04030</code>.</p>
   <script type="text/plsql" data-title="Organigramme par récursivité croisée">
     DECLARE
       PROCEDURE afficher_equipe (p_mgr_id NUMBER, p_niveau PLS_INTEGER);   -- déclaration anticipée
@@ -2762,6 +2763,7 @@ Leroy.....  4800
     Garcia
   Durand
   Leroy</div>
+  <p class="prose">Dans SQL*Plus, <code>SET SERVEROUTPUT ON</code> supprime les espaces en début de ligne : utilise <code>SET SERVEROUTPUT ON FORMAT WRAPPED</code> pour voir l'indentation (SQL Developer la conserve).</p>
   <p class="prose">Pour un vrai organigramme, une requête hiérarchique (<code>CONNECT BY</code> ou <code>WITH</code> récursif) fait le même travail en un seul ordre SQL, sans une requête par employé. La récursivité PL/SQL reste utile pour parcourir des structures en mémoire (collections, documents JSON).</p>
   <div class="callout tip"><span class="ct">Surcharge locale</span><p>Deux sous-programmes locaux du même bloc peuvent porter le même nom s'ils diffèrent par le nombre ou la famille de types de leurs paramètres, par exemple <code>formater(p_sal NUMBER)</code> et <code>formater(p_date DATE)</code>. C'est impossible pour des procédures autonomes du schéma (un seul objet par nom). Les règles de la surcharge sont détaillées avec les packages au <a href="#ch07">chapitre 07</a>.</p></div>
 
@@ -2801,7 +2803,7 @@ Leroy.....  4800
     </tbody>
   </table></div>
   <p class="prose">La clause se place dans l'en-tête, avant <code>IS</code> / <code>AS</code> : <code>CREATE OR REPLACE FUNCTION f (…) RETURN NUMBER AUTHID CURRENT_USER IS …</code>. Elle concerne surtout le SQL dynamique, détaillé au <a href="#ch11">chapitre 11</a> : un utilitaire qui compte les lignes d'une table dont le nom est passé en paramètre doit compter celles de la table de l'appelant, pas celles du propriétaire.</p>
-  <div class="callout pitfall"><span class="ct">Piège classique : les rôles</span><p>Les privilèges obtenus via un <strong>rôle</strong> ne servent pas à compiler du PL/SQL stocké, et ne sont jamais actifs dans une unité <code>AUTHID DEFINER</code>. Une requête qui fonctionne dans SQL Developer (grâce à un <code>SELECT</code> obtenu via un rôle) échoue à la compilation de la procédure avec <code>PL/SQL: ORA-00942: table or view does not exist</code>. Solution : accorder le privilège directement au propriétaire (<code>GRANT SELECT ON rh.employes TO appli</code>). Depuis 12c, on peut aussi accorder un rôle à l'unité PL/SQL elle-même (<code>GRANT role TO PROCEDURE …</code>).</p></div>
+  <div class="callout pitfall"><span class="ct">Piège classique : les rôles</span><p>Les privilèges obtenus via un <strong>rôle</strong> ne servent pas à compiler du PL/SQL stocké, et ne sont jamais actifs dans une unité <code>AUTHID DEFINER</code>. Une requête qui fonctionne dans SQL Developer (grâce à un <code>SELECT</code> obtenu via un rôle) échoue à la compilation de la procédure avec <code>PL/SQL: ORA-00942: table or view does not exist</code>. Solution : accorder le privilège directement au propriétaire (<code>GRANT SELECT ON rh.employes TO appli</code>). Depuis 12c, on peut aussi accorder un rôle à l'unité PL/SQL elle-même (<code>GRANT role TO PROCEDURE …</code>), surtout utile en <code>AUTHID CURRENT_USER</code> ; ce rôle n'est actif qu'à l'exécution et ne règle donc pas la compilation du SQL statique.</p></div>
 
   <h2>Exercices</h2>
   <div class="ex" data-ex="ch06-e1">
@@ -2877,22 +2879,8 @@ Leroy.....  4800
       </details>
     </div>
   </div>
-  <div class="ex" data-ex="ch06-e3">
-    <div class="ex-head"><h4>Exercice 3 · Réécrire pour la performance</h4><span class="lvl l3">difficile</span></div>
-    <div class="ex-body">
-      <p>Un collègue a écrit <code>SELECT e.nom, nom_dept(e.emp_id) FROM employes e</code>, où <code>nom_dept</code> lit l'employé puis son département. La requête est lente sur 2 millions de lignes. Propose au moins trois améliorations, de la meilleure à la moins bonne.</p>
-      <details class="sol"><summary>Voir la solution</summary>
-        <ol>
-          <li><strong>Supprimer la fonction</strong> : une jointure <code>JOIN departements d ON d.dept_id = e.dept_id</code>. Zéro changement de contexte, l'optimiseur choisit le meilleur plan. C'est la réponse attendue.</li>
-          <li>Si la fonction doit rester (règle métier partagée) : lui passer <code>e.dept_id</code> plutôt que <code>emp_id</code> pour supprimer une lecture, et la déclarer <code>RESULT_CACHE</code> comme <code>nom_departement</code> (peu de départements, beaucoup d'appels identiques).</li>
-          <li>L'appeler via une sous-requête scalaire <code>(SELECT nom_departement(e.dept_id) FROM dual)</code> pour profiter du cache de sous-requête scalaire (4 valeurs distinctes, donc 4 appels), et ajouter <code>PRAGMA UDF</code>.</li>
-        </ol>
-        <p class="hint">Ne propose pas <code>DETERMINISTIC</code> ici : la fonction lit une table, son résultat peut changer.</p>
-      </details>
-    </div>
-  </div>
   <div class="ex" data-ex="ch06-e4">
-    <div class="ex-head"><h4>Exercice 4 · Prédire l'affichage</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-head"><h4>Exercice 3 · Prédire l'affichage</h4><span class="lvl l2">moyen</span></div>
     <div class="ex-body">
       <p>Sans l'exécuter, donne les trois lignes affichées par ce bloc.</p>
       <script type="text/plsql" data-title="Énoncé">
@@ -2926,6 +2914,20 @@ C : 135</div>
       </details>
     </div>
   </div>
+  <div class="ex" data-ex="ch06-e3">
+    <div class="ex-head"><h4>Exercice 4 · Réécrire pour la performance</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Un collègue a écrit <code>SELECT e.nom, nom_dept(e.emp_id) FROM employes e</code>, où <code>nom_dept</code> lit l'employé puis son département. La requête est lente sur 2 millions de lignes. Propose au moins trois améliorations, de la meilleure à la moins bonne.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <ol>
+          <li><strong>Supprimer la fonction</strong> : une jointure <code>JOIN departements d ON d.dept_id = e.dept_id</code>. Zéro changement de contexte, l'optimiseur choisit le meilleur plan. C'est la réponse attendue.</li>
+          <li>Si la fonction doit rester (règle métier partagée) : lui passer <code>e.dept_id</code> plutôt que <code>emp_id</code> pour supprimer une lecture, et la déclarer <code>RESULT_CACHE</code> comme <code>nom_departement</code> (peu de départements, beaucoup d'appels identiques).</li>
+          <li>L'appeler via une sous-requête scalaire <code>(SELECT nom_departement(e.dept_id) FROM dual)</code> pour profiter du cache de sous-requête scalaire (un appel par département distinct, soit une poignée d'appels au lieu de 2 millions), et ajouter <code>PRAGMA UDF</code>.</li>
+        </ol>
+        <p class="hint">Ne propose pas <code>DETERMINISTIC</code> ici : la fonction lit une table, son résultat peut changer.</p>
+      </details>
+    </div>
+  </div>
   <div class="ex" data-ex="ch06-e5">
     <div class="ex-head"><h4>Exercice 5 · Chaîne hiérarchique récursive</h4><span class="lvl l3">difficile</span></div>
     <div class="ex-body">
@@ -2955,7 +2957,7 @@ C : 135</div>
         <div class="output">Garcia > Petit > Bernard > Martin
 Martin
 ?</div>
-        <p class="hint">En SQL, la même chaîne s'obtient en un seul ordre avec <code>SYS_CONNECT_BY_PATH</code> ou un <code>WITH</code> récursif. Si les données contenaient un cycle (un employé manager de son propre manager), cette fonction bouclerait jusqu'à épuisement de la mémoire : un compteur de profondeur maximale est une bonne protection.</p>
+        <p class="hint">En SQL, la même chaîne s'obtient en un seul ordre avec <code>SYS_CONNECT_BY_PATH</code> ou un <code>WITH</code> récursif. Si les données contenaient un cycle (un employé manager de son propre manager), cette fonction bouclerait jusqu'à épuisement de la mémoire (<code>STORAGE_ERROR</code> ou <code>ORA-04030</code>) : un compteur de profondeur maximale est une bonne protection.</p>
       </details>
     </div>
   </div>
@@ -2964,7 +2966,7 @@ Martin
   <div data-quiz="ch06"></div>
 
   <h2>Questions d'entretien</h2>
-  <details class="qa"><summary>Peut-on faire un COMMIT dans une fonction ?</summary><div><p>Techniquement oui si elle est appelée depuis PL/SQL, mais c'est une mauvaise pratique : une fonction calcule, elle ne doit pas avoir d'effet de bord, et elle validerait la transaction de l'appelant sans qu'il le sache. Appelée depuis un <code>SELECT</code>, un DML lève <code>ORA-14551</code> et un <code>COMMIT</code> lève <code>ORA-14552</code>. La seule exception est la transaction autonome, réservée à des cas comme la journalisation.</p></div></details>
+  <details class="qa"><summary>Peut-on faire un COMMIT dans une fonction ?</summary><div><p>Techniquement oui si elle est appelée depuis PL/SQL, mais c'est une mauvaise pratique : une fonction calcule, elle ne doit pas avoir d'effet de bord, et elle validerait la transaction de l'appelant sans qu'il le sache. Appelée depuis un <code>SELECT</code>, un DML lève <code>ORA-14551</code> ; appelée depuis un <code>SELECT</code> ou un ordre DML, un <code>COMMIT</code> lève <code>ORA-14552</code>. La seule exception est la transaction autonome, réservée à des cas comme la journalisation.</p></div></details>
   <details class="qa"><summary>Que devient un paramètre OUT si la procédure lève une exception ?</summary><div><p>Sans <code>NOCOPY</code>, rien n'est recopié : la variable de l'appelant garde sa valeur d'avant l'appel, même si la procédure avait déjà affecté le paramètre. Avec <code>NOCOPY</code>, le passage peut se faire par référence et la variable peut rester partiellement modifiée ; comme <code>NOCOPY</code> n'est qu'une indication, l'appelant ne doit compter sur aucun des deux comportements.</p></div></details>
   <details class="qa"><summary>Différence entre DETERMINISTIC et RESULT_CACHE ?</summary><div><p><code>DETERMINISTIC</code> est une promesse faite à Oracle que la fonction renvoie toujours la même chose pour les mêmes entrées ; Oracle ne la vérifie pas, le bénéfice se limite à l'exécution de la requête dans la session, et c'est requis pour un index sur fonction. <code>RESULT_CACHE</code> stocke réellement les résultats dans la SGA, les partage entre sessions et les invalide quand les tables lues sont modifiées et validées : il convient à une fonction qui lit des données rarement modifiées.</p></div></details>
   <details class="qa"><summary>Ma procédure ne compile pas (ORA-00942) alors que la requête marche dans SQL Developer. Pourquoi ?</summary><div><p>Le privilège sur la table est obtenu via un rôle. Les rôles ne sont pas pris en compte pour compiler du PL/SQL stocké ni à l'exécution d'une unité <code>AUTHID DEFINER</code>. Il faut un <code>GRANT</code> direct au propriétaire de la procédure. En <code>AUTHID CURRENT_USER</code>, les rôles de l'appelant sont actifs à l'exécution, mais la compilation demande toujours des privilèges directs (ou du SQL dynamique).</p></div></details>
@@ -3835,7 +3837,7 @@ Dept 40 : 0 ligne(s)</div>
   <div class="callout pitfall"><span class="ct">Piège : FORALL i IN 1 .. n sur une collection creuse</span><p>Si un élément a été supprimé (<code>DELETE(3)</code>), <code>FORALL i IN 1 .. l_coll.COUNT</code> lève <code>ORA-22160: element at index [3] does not exist</code> et rate le dernier indice. Utilise <code>INDICES OF</code>.</p></div>
 
   <h3>SAVE EXCEPTIONS : ne pas tout perdre pour une ligne</h3>
-  <p class="prose">Par défaut, la première erreur arrête le <code>FORALL</code> : seule la ligne fautive est annulée (rollback au niveau de l'instruction), les itérations précédentes restent faites et les suivantes ne sont pas exécutées. Avec <code>SAVE EXCEPTIONS</code>, Oracle exécute toutes les itérations, mémorise les échecs, puis lève <code>ORA-24381: error(s) in array DML</code> à la fin. On lit le détail dans <code>SQL%BULK_EXCEPTIONS</code> : <code>COUNT</code>, puis pour chaque erreur <code>ERROR_INDEX</code> (l'itération en échec) et <code>ERROR_CODE</code> (le code Oracle, <strong>positif</strong>).</p>
+  <p class="prose">Par défaut, la première erreur arrête le <code>FORALL</code> : seule l'itération fautive est annulée (rollback au niveau de l'instruction), les itérations précédentes restent faites et les suivantes ne sont pas exécutées. Avec <code>SAVE EXCEPTIONS</code>, Oracle exécute toutes les itérations, mémorise les échecs, puis lève <code>ORA-24381: error(s) in array DML</code> à la fin. On lit le détail dans <code>SQL%BULK_EXCEPTIONS</code> : <code>COUNT</code>, puis pour chaque erreur <code>ERROR_INDEX</code> (l'itération en échec) et <code>ERROR_CODE</code> (le code Oracle, <strong>positif</strong>).</p>
   <p class="prose">Exemple : retirer 4 000 au salaire de chaque employé du département 20. Durand (3 900) et Garcia (1 400) passeraient sous zéro et violent <code>ck_emp_salaire</code>.</p>
   <script type="text/plsql" data-title="FORALL … SAVE EXCEPTIONS">
     DECLARE
@@ -3878,7 +3880,7 @@ sequenceDiagram
   S-->>P: ORA-24381 (erreurs dans le DML de tableau)
   Note over P: handler WHEN e_erreurs_bulk<br/>SQL%BULK_EXCEPTIONS.COUNT = 2<br/>ERROR_INDEX 3 et 5, ERROR_CODE 2290
     </pre><p class="cap">FORALL … SAVE EXCEPTIONS : toutes les itérations sont tentées, une seule exception est levée à la fin.</p></div>
-  <div class="callout pitfall"><span class="ct">Pièges de SAVE EXCEPTIONS</span><p><code>ERROR_CODE</code> vaut <code>2290</code>, pas <code>-2290</code> : il faut écrire <code>SQLERRM(-ERROR_CODE)</code>. Ce message est générique : le nom de la contrainte est perdu (<code>(.)</code>). Et si tu oublies de traiter <code>ORA-24381</code>, l'exception remonte comme n'importe quelle autre. Enfin, avec <code>INDICES OF</code> ou <code>VALUES OF</code>, <code>ERROR_INDEX</code> est le <strong>numéro d'itération</strong>, pas forcément l'indice de la collection : pour une collection creuse, il faut le retraduire.</p></div>
+  <div class="callout pitfall"><span class="ct">Pièges de SAVE EXCEPTIONS</span><p><code>ERROR_CODE</code> vaut <code>2290</code>, pas <code>-2290</code> : il faut écrire <code>SQLERRM(-ERROR_CODE)</code>. Ce message est générique : le nom de la contrainte est perdu (<code>(.)</code>). Et si tu oublies de traiter <code>ORA-24381</code>, l'exception remonte comme n'importe quelle autre. Enfin, avec <code>INDICES OF</code> ou <code>VALUES OF</code>, <code>ERROR_INDEX</code> est le <strong>numéro d'itération</strong> (1 pour le premier élément parcouru, 2 pour le deuxième…), pas l'indice de la collection : sur une collection creuse, il faut le retraduire en parcourant la collection avec <code>FIRST</code> / <code>NEXT</code>. Attention à l'asymétrie : <code>SQL%BULK_ROWCOUNT</code>, lui, est indexé par les indices de la collection (voir l'exercice 4).</p></div>
   <div class="callout interview"><span class="ct">En entretien</span><p>On te demandera souvent « comment traiter un million de lignes sans que la première erreur fasse tout échouer ? ». Réponse attendue : <code>BULK COLLECT … LIMIT</code>, <code>FORALL … SAVE EXCEPTIONS</code>, journalisation des lignes de <code>SQL%BULK_EXCEPTIONS</code>, <code>COMMIT</code> selon la règle métier. Puis ajoute que, si la logique tient en un ordre SQL, <code>LOG ERRORS</code> fait la même chose sans PL/SQL.</p></div>
 
   <h3>L'alternative SQL : DML error logging</h3>
@@ -3898,7 +3900,7 @@ sequenceDiagram
   <p class="prose">La table contient aussi <code>ORA_ERR_MESG$</code> (message complet, avec le nom de la contrainte) et l'étiquette <code>'ch09'</code>. Les lignes d'erreur sont écrites de façon autonome : le <code>ROLLBACK</code> ne les efface pas. Limites : sans <code>REJECT LIMIT</code>, la valeur par défaut est 0 (la première erreur fait échouer l'ordre), et certaines erreurs ne sont pas journalisées (contraintes différées notamment).</p>
 
   <h2>Fonctions pipelined</h2>
-  <p class="prose">Une fonction « table » renvoie une collection qu'on interroge avec <code>TABLE()</code> (type SQL obligatoire, voir <a href="#ch08">chapitre 08</a>). En mode <code>PIPELINED</code>, elle envoie chaque ligne dès qu'elle est prête (<code>PIPE ROW</code>) au lieu de construire toute la collection en mémoire : la requête appelante commence à recevoir des lignes tout de suite. C'est idéal pour des transformations de données en flux (ETL).</p>
+  <p class="prose">Une fonction « table » renvoie une collection qu'on interroge avec <code>TABLE()</code>. Le type de retour doit être connu de SQL : le plus simple est un type créé par <code>CREATE TYPE</code> (voir <a href="#ch08">chapitre 08</a>) ; une fonction pipelined accepte aussi un type déclaré dans la spécification d'un package. En mode <code>PIPELINED</code>, elle envoie chaque ligne dès qu'elle est prête (<code>PIPE ROW</code>) au lieu de construire toute la collection en mémoire : la requête appelante commence à recevoir des lignes tout de suite. C'est idéal pour des transformations de données en flux (ETL).</p>
   <script type="text/plsql" data-title="Fonction pipelined">
     CREATE OR REPLACE TYPE t_ligne_paie AS OBJECT (emp_id NUMBER, mois DATE, montant NUMBER);
     /
@@ -3928,7 +3930,7 @@ sequenceDiagram
 108  36000
 109  16800</div>
   <p class="prose">10 employés × 12 mois = 120 lignes produites, regroupées par la requête (total général 562 800 = 46 900 × 12). Depuis 12.2, on peut écrire <code>FROM echeancier(2026)</code> sans <code>TABLE()</code>.</p>
-  <div class="callout pitfall"><span class="ct">Piège</span><p>Une fonction pipelined se termine par <code>RETURN;</code> <strong>sans valeur</strong> : les lignes sont déjà parties avec <code>PIPE ROW</code>. Et on ne l'appelle pas comme une fonction ordinaire en PL/SQL (<code>l_t := echeancier(2026)</code> est refusé) : on l'interroge en SQL.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Une fonction pipelined se termine par <code>RETURN;</code> <strong>sans valeur</strong> : les lignes sont déjà parties avec <code>PIPE ROW</code>. Et on ne l'appelle pas comme une fonction ordinaire en PL/SQL (<code>l_t := echeancier(2026)</code> est refusé à la compilation : <code>PLS-00653</code>) : on l'interroge en SQL.</p></div>
   <p class="prose">Pour aller plus loin : avec <code>PARALLEL_ENABLE</code> et un paramètre <code>SYS_REFCURSOR</code> partitionné (<code>PARALLEL_ENABLE (PARTITION p_cur BY ANY)</code>), une fonction pipelined peut être exécutée par plusieurs processus parallèles, chacun traitant une partie des lignes du curseur.</p>
 
   <h2>Exercices</h2>
@@ -4058,7 +4060,7 @@ Lot 3 : 1 ligne(s)</div>
           END;
           /
         </script>
-        <p class="hint">Résultat : 301, 303 et 304 insérés ; 2 lignes dans <code>journal_erreurs</code> (codes -1 et -2290, messages <code>id 102 : ORA-00001: unique constraint (.) violated</code> et <code>id 302 : ORA-02290: check constraint (.) violated</code>). On passe par la variable <code>l_msg</code> car <code>SQLERRM</code> ne peut pas être appelé directement dans un ordre SQL. <code>SQL%BULK_EXCEPTIONS</code> décrit le dernier <code>FORALL</code> exécuté : les <code>INSERT</code> du journal ne l'effacent pas. Le bloc imbriqué permet de continuer vers le <code>COMMIT</code> après avoir traité <code>ORA-24381</code>.</p>
+        <p class="hint">Résultat : 301, 303 et 304 insérés ; 2 lignes dans <code>journal_erreurs</code> (codes -1 et -2290, messages en 19c <code>id 102 : ORA-00001: unique constraint (.) violated</code> et <code>id 302 : ORA-02290: check constraint (.) violated</code>). On passe par la variable <code>l_msg</code> car <code>SQLERRM</code> ne peut pas être appelé directement dans un ordre SQL (<code>PLS-00231</code>). <code>SQL%BULK_EXCEPTIONS</code> décrit le dernier <code>FORALL</code> exécuté : les <code>INSERT</code> simples du journal ne l'effacent pas. Le bloc imbriqué permet de continuer vers le <code>COMMIT</code> après avoir traité <code>ORA-24381</code>.</p>
       </details>
     </div>
   </div>
@@ -4138,7 +4140,7 @@ emp 104 : 1 ligne(s)</div>
   </table></div>
   <p class="prose">Déroule un <code>UPDATE</code> qui touche deux lignes : l'ordre de déclenchement est toujours le même.</p>
   <div data-stepper="trigger-order"></div>
-  <p class="prose">Les quatre triggers de l'animation sont des jouets : après l'essai, fais <code>ROLLBACK</code> puis <code>DROP TRIGGER t_bs;</code>, <code>t_br</code>, <code>t_ar</code> et <code>t_as</code>, sinon ils parleront à chaque <code>UPDATE</code> des chapitres suivants.</p>
+  <p class="prose">Les quatre triggers de l'animation sont des jouets : après l'essai, fais <code>ROLLBACK</code> puis supprime-les (<code>DROP TRIGGER t_bs;</code>, et de même pour <code>t_br</code>, <code>t_ar</code> et <code>t_as</code>), sinon ils parleront à chaque <code>UPDATE</code> des chapitres suivants.</p>
   <div class="diagram"><pre class="mermaid">
 flowchart TD
   A["Ordre DML (INSERT, UPDATE, DELETE)"] --> B["BEFORE STATEMENT<br/>une seule fois"]
@@ -4187,7 +4189,7 @@ flowchart TD
   </script>
   <div class="callout pitfall"><span class="ct">Piège</span><p><code>UPDATE OF salaire</code> déclenche le trigger dès que <code>salaire</code> figure dans le <code>SET</code>, <strong>même si la valeur ne change pas</strong> (<code>SET salaire = salaire</code>, ou un écran qui renvoie toutes les colonnes). D'où la clause <code>WHEN</code>. Dans <code>WHEN</code>, on écrit <code>NEW</code> et <code>OLD</code> <strong>sans</strong> deux-points ; dans le corps, <code>:NEW</code> et <code>:OLD</code>. <code>WHEN</code> n'existe que pour les triggers de ligne.</p></div>
   <p class="prose">Un même trigger peut couvrir plusieurs événements : les prédicats <code>INSERTING</code>, <code>UPDATING</code> et <code>DELETING</code> indiquent lequel est en cours. Ici, un trigger d'<strong>instruction</strong> qui interdit toute modification des départements hors des heures de bureau.</p>
-  <div class="callout pitfall"><span class="ct">Avant de l'exécuter</span><p>Si tu révises le soir (après 19 h 59) ou avant 8 h, ce trigger bloquera <strong>tout</strong> <code>INSERT</code>, <code>UPDATE</code> ou <code>DELETE</code> sur <code>departements</code>, y compris le script du <a href="#ch00">chapitre 00</a> qui recrée le schéma. Supprime-le dès que tu l'as essayé (dernière ligne du bloc).</p></div>
+  <div class="callout pitfall"><span class="ct">Avant de l'exécuter</span><p>Si tu révises le soir (après 19 h 59) ou avant 8 h (heure du <strong>serveur</strong>, car <code>SYSDATE</code> suit son horloge), ce trigger bloquera <strong>tout</strong> <code>INSERT</code>, <code>UPDATE</code> ou <code>DELETE</code> sur <code>departements</code> tant qu'il existe, y compris dans les exemples des chapitres suivants. Supprime-le dès que tu l'as essayé (dernière ligne du bloc).</p></div>
   <script type="text/plsql" data-title="Un trigger pour plusieurs événements">
     CREATE OR REPLACE TRIGGER trg_departements_controle
       BEFORE INSERT OR UPDATE OR DELETE ON departements
@@ -4272,7 +4274,9 @@ ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
 
       AFTER EACH ROW IS
       BEGIN
-        g_depts(:NEW.dept_id) := TRUE;                      -- on note seulement le département
+        IF :NEW.dept_id IS NOT NULL THEN                    -- une clé NULL lèverait ORA-06502
+          g_depts(:NEW.dept_id) := TRUE;                    -- on note seulement le département
+        END IF;
       END AFTER EACH ROW;
 
       AFTER STATEMENT IS
@@ -4293,11 +4297,11 @@ ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
     END trg_sal_plafond;
     /
     UPDATE employes SET salaire = salaire * 1.01 WHERE dept_id = 20;   -- passe désormais
-    UPDATE employes SET salaire = 40000 WHERE emp_id = 109;            -- moyenne 12 040, plafond 36 120
+    UPDATE employes SET salaire = 40000 WHERE emp_id = 109;            -- moyenne 12 080,4 ; plafond 36 241,2
     ROLLBACK;
   </script>
   <div class="output">ORA-20300: Salaire hors plafond dans le département 20</div>
-  <p class="prose">Le premier <code>UPDATE</code> réussit. Le second échoue (la pile se poursuit avec <code>ORA-06512</code> et <code>ORA-04088</code>) et seul cet ordre est annulé. Les variables déclarées en tête d'un trigger composé sont réinitialisées à chaque ordre DML : pas de fuite d'un ordre à l'autre, contrairement à une variable de package.</p>
+  <p class="prose">Le premier <code>UPDATE</code> réussit. Le second est évalué sur les salaires déjà augmentés de 1 % : moyenne (7 272 + 4 343 + 3 939 + 4 848 + 40 000) / 5 = 12 080,4, plafond 36 241,2. Il échoue donc (la pile se poursuit avec <code>ORA-06512</code> et <code>ORA-04088</code>) et seul cet ordre est annulé. Les variables déclarées en tête d'un trigger composé sont réinitialisées à chaque ordre DML : pas de fuite d'un ordre à l'autre, contrairement à une variable de package.</p>
   <div class="callout tip"><span class="ct">Autres solutions à citer</span><p>Avant 11g : un package avec une collection, un trigger de ligne qui la remplit et un trigger d'instruction qui la traite. Souvent, la meilleure réponse est de <strong>sortir la règle du trigger</strong> : la mettre dans la procédure d'API qui fait la mise à jour, ou dans une contrainte déclarative quand c'est possible.</p></div>
 
   <h2>Bonnes pratiques</h2>
@@ -4329,7 +4333,7 @@ ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
                 OR (NEW.salaire IS NULL AND OLD.salaire IS NOT NULL)
                 OR (NEW.salaire IS NOT NULL AND OLD.salaire IS NULL))
         </script>
-        <p class="hint">Variante compacte, déjà vue au <a href="#ch02">chapitre 02</a> : <code>WHEN (DECODE(NEW.salaire, OLD.salaire, 0, 1) = 1)</code>, car <code>DECODE</code> considère deux NULL comme égaux.</p>
+        <p class="hint">Variante compacte, déjà vue au <a href="#ch02">chapitre 02</a> : <code>WHEN (DECODE(NEW.salaire, OLD.salaire, 0, 1) = 1)</code>, car <code>DECODE</code> considère deux NULL comme égaux. C'est permis ici parce que la clause <code>WHEN</code> est une condition <strong>SQL</strong> : fonctions SQL intégrées autorisées, mais ni sous-requête ni appel de fonction PL/SQL.</p>
       </details>
     </div>
   </div>
@@ -4453,12 +4457,12 @@ AFTER STATEMENT</div>
       <tr><td>Fin de session</td><td>Normale : dépend de l'outil (SQL*Plus valide à <code>EXIT</code> par défaut) ; anormale : annulée</td></tr>
     </tbody>
   </table></div>
-  <div class="callout pitfall"><span class="ct">Piège : le DDL valide tout ce qui précède</span><p>Un <code>EXECUTE IMMEDIATE 'CREATE TABLE …'</code> ou un <code>TRUNCATE</code> au milieu d'un traitement valide silencieusement tous les DML en attente : le <code>ROLLBACK</code> du bloc <code>EXCEPTION</code> n'aura plus rien à annuler. Le COMMIT d'avant a lieu même si le DDL échoue ensuite (table déjà existante, par exemple).</p></div>
+  <div class="callout pitfall"><span class="ct">Piège : le DDL valide tout ce qui précède</span><p>Un <code>EXECUTE IMMEDIATE 'CREATE TABLE …'</code> ou un <code>TRUNCATE</code> au milieu d'un traitement valide silencieusement tous les DML en attente : le <code>ROLLBACK</code> du bloc <code>EXCEPTION</code> n'aura plus rien à annuler. Le COMMIT d'avant a lieu même si le DDL échoue ensuite à l'exécution (table déjà existante, par exemple) ; seule une erreur de syntaxe, détectée avant l'exécution, ne déclenche pas ce COMMIT. Ne compte donc jamais sur l'échec d'un DDL pour préserver ta transaction.</p></div>
   <div class="callout interview"><span class="ct">En entretien : « Qui doit faire le COMMIT ? »</span><p>L'<strong>appelant de plus haut niveau</strong>, celui qui connaît le périmètre de l'unité de travail (le service applicatif, le job batch). Une procédure réutilisable ne doit pas valider elle-même : si elle est appelée au milieu d'un traitement plus large, son <code>COMMIT</code> validerait aussi le travail de l'appelant, qui ne pourrait plus tout annuler.</p></div>
-  <div class="callout pitfall"><span class="ct">Piège : COMMIT dans une boucle</span><p>Valider « toutes les 1 000 lignes » est une fausse bonne idée : c'est plus lent (chaque <code>COMMIT</code> attend l'écriture du journal), un traitement interrompu laisse des données à moitié traitées et difficiles à reprendre, et un curseur ouvert sur des données que tu modifies peut lever <code>ORA-01555: snapshot too old</code>. Sur un curseur <code>FOR UPDATE</code>, c'est <code>ORA-01002</code> (<a href="#ch04">chapitre 04</a>). Valide une fois, à la fin.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège : COMMIT dans une boucle</span><p>Valider « toutes les 1 000 lignes » est une fausse bonne idée : c'est généralement plus lent (chaque <code>COMMIT</code> déclenche une écriture du journal de reprise et a un coût fixe), un traitement interrompu laisse des données à moitié traitées et difficiles à reprendre, et un curseur ouvert sur des données que tu modifies peut lever <code>ORA-01555: snapshot too old</code>. Sur un curseur <code>FOR UPDATE</code>, c'est <code>ORA-01002</code> (<a href="#ch04">chapitre 04</a>). Valide une fois, à la fin.</p></div>
 
   <h2>Lecture cohérente, isolation et verrous</h2>
-  <p class="prose">Oracle garantit que chaque requête voit les données <strong>telles qu'elles étaient validées au moment où elle a commencé</strong>, même si d'autres sessions les modifient pendant sa lecture (il reconstitue l'ancienne image grâce à l'undo). Conséquence : <strong>une lecture ne bloque jamais une écriture et une écriture ne bloque jamais une lecture</strong>. Seules deux écritures sur la <strong>même ligne</strong> s'attendent : la seconde patiente jusqu'au <code>COMMIT</code> ou au <code>ROLLBACK</code> de la première.</p>
+  <p class="prose">Oracle garantit que chaque requête voit les données <strong>telles qu'elles étaient validées au moment où elle a commencé</strong>, même si d'autres sessions les modifient pendant sa lecture (il reconstitue l'ancienne image grâce à l'undo). Conséquence : <strong>une lecture ne bloque jamais une écriture et une écriture ne bloque jamais une lecture</strong> (un <code>SELECT … FOR UPDATE</code> n'est pas une simple lecture : il verrouille les lignes comme une écriture). Seules deux écritures sur la <strong>même ligne</strong> s'attendent : la seconde patiente jusqu'au <code>COMMIT</code> ou au <code>ROLLBACK</code> de la première.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Niveau d'isolation</th><th>Ce que voit chaque requête</th><th>À retenir</th></tr></thead>
     <tbody>
@@ -4587,7 +4591,7 @@ Plus de 5000 : Moreau</div>
     <ul>
       <li>Une variable liée remplace une <strong>valeur</strong>, jamais un identifiant : <code>'SELECT COUNT(*) FROM :t'</code> lève <code>ORA-00903: invalid table name</code>.</li>
       <li>Dans un ordre SQL dynamique, les variables liées sont associées <strong>par position</strong>, pas par nom : <code>:x</code> écrit deux fois demande deux valeurs dans <code>USING</code>.</li>
-      <li>Pas de point-virgule final dans un ordre SQL (<code>'… WHERE emp_id = :id;'</code> provoque une erreur de syntaxe, <code>ORA-00911: invalid character</code> en 19c). Un bloc PL/SQL dynamique, lui, se termine par <code>END;</code>.</li>
+      <li>Pas de point-virgule final dans un ordre SQL (<code>'… WHERE emp_id = :id;'</code> provoque une erreur à l'exécution, typiquement <code>ORA-00911: invalid character</code> en 19c ; le code et le message exacts peuvent varier selon la version). Un bloc PL/SQL dynamique, lui, se termine par <code>END;</code>.</li>
     </ul>
   </div>
 
@@ -4672,7 +4676,7 @@ Plus de 5000 : Moreau</div>
           <li>Le <code>CREATE TABLE</code> fait un COMMIT implicite : le premier <code>UPDATE</code> (1400 → 1500) est validé à ce moment-là.</li>
           <li>Le <code>ROLLBACK</code> n'annule que le second <code>UPDATE</code>. La table <code>tmp_e4</code> existe toujours : un DDL ne s'annule pas.</li>
         </ul>
-        <p class="hint">Nettoyage : <code>DROP TABLE tmp_e4 PURGE;</code> puis relance le script du chapitre 00 pour retrouver les données d'origine.</p>
+        <p class="hint">Si tu relances le bloc sans supprimer <code>tmp_e4</code>, le <code>CREATE TABLE</code> lève <code>ORA-00955</code>, mais le COMMIT implicite a déjà eu lieu : le premier <code>UPDATE</code> est validé quand même. Nettoyage : <code>DROP TABLE tmp_e4 PURGE;</code> puis relance le script du chapitre 00 pour retrouver les données d'origine.</p>
       </details>
     </div>
   </div>
@@ -4821,7 +4825,7 @@ Petit 4300</div>
     /
     SHOW ERRORS
   </script>
-  <p class="prose">La procédure est créée (un avertissement n'empêche pas la compilation : SQL*Plus affiche « created with compilation warnings »), et <code>SHOW ERRORS</code> liste notamment ces deux avertissements :</p>
+  <p class="prose">La procédure est créée (un avertissement n'empêche pas la compilation : SQL*Plus affiche « created with compilation warnings »), et <code>SHOW ERRORS</code> liste, avec leur position <code>LINE/COL</code>, notamment ces deux avertissements :</p>
   <div class="output">PLW-05018: unit P_TEST omitted optional AUTHID clause; default value DEFINER used
 PLW-06009: procedure "P_TEST" OTHERS handler does not end in RAISE or RAISE_APPLICATION_ERROR</div>
   <p class="prose">D'autres avertissements utiles : <code>PLW-06002</code> (code inaccessible), <code>PLW-07204</code> (conversion qui peut empêcher l'usage d'un index). En équipe, on peut transformer un avertissement en erreur bloquante : <code>PLSQL_WARNINGS = 'ERROR:06009'</code>. La compilation native (<code>PLSQL_CODE_TYPE = NATIVE</code>) accélère le code très calculatoire, pas le code qui passe son temps dans le SQL.</p>
@@ -4913,7 +4917,7 @@ flowchart TD
   <div class="table-wrap"><table>
     <thead><tr><th>Version</th><th>Nouveautés PL/SQL et SQL utiles</th></tr></thead>
     <tbody>
-      <tr><td>11g</td><td>Trigger composé, <code>FOLLOWS</code>, <code>CONTINUE</code>, <code>SIMPLE_INTEGER</code>, fonctions <code>RESULT_CACHE</code>, <code>seq.NEXTVAL</code> directement dans une expression PL/SQL, <code>PIVOT</code> / <code>UNPIVOT</code>, <code>LISTAGG</code>.</td></tr>
+      <tr><td>11g</td><td>Trigger composé, <code>FOLLOWS</code>, <code>CONTINUE</code>, <code>SIMPLE_INTEGER</code>, fonctions <code>RESULT_CACHE</code>, <code>seq.NEXTVAL</code> directement dans une expression PL/SQL, <code>PIVOT</code> / <code>UNPIVOT</code>, <code>LISTAGG</code> (11gR2).</td></tr>
       <tr><td>12c</td><td><code>WITH FUNCTION</code> dans une requête, <code>PRAGMA UDF</code>, <code>ACCESSIBLE BY</code>, colonnes <code>IDENTITY</code>, <code>FETCH FIRST n ROWS ONLY</code>, <code>UTL_CALL_STACK</code>, résultats implicites (<code>DBMS_SQL.RETURN_RESULT</code>), collections déclarées dans un package utilisables avec <code>TABLE()</code>.</td></tr>
       <tr><td>18c</td><td>Expressions qualifiées (constructeurs de records et de tableaux associatifs), fonctions table polymorphes, tables temporaires privées.</td></tr>
       <tr><td>19c</td><td><code>LISTAGG (DISTINCT …)</code>. C'est la version « long terme » la plus déployée aujourd'hui.</td></tr>
@@ -5001,19 +5005,29 @@ flowchart TD
           END pkg_log;
           /
           CREATE OR REPLACE PACKAGE BODY pkg_log AS
-            -- Profondeurs vues depuis cette fonction :
-            --   1 = appelant (la fonction elle-même), 2 = info ou erreur,
-            --   3 = le programme qui a appelé pkg_log.info / pkg_log.erreur
+            -- Remonte la pile (1 = cette fonction, 2 = info ou erreur, 3 = leur appelant...)
+            -- et renvoie le premier sous-programme qui n'appartient pas à PKG_LOG.
+            -- La boucle s'arrête à DYNAMIC_DEPTH : jamais d'ORA-64610 (bad depth).
             FUNCTION appelant RETURN VARCHAR2 IS
+              l_nom UTL_CALL_STACK.UNIT_QUALIFIED_NAME;
             BEGIN
-              RETURN UTL_CALL_STACK.CONCATENATE_SUBPROGRAM(UTL_CALL_STACK.SUBPROGRAM(3));
+              FOR i IN 1 .. UTL_CALL_STACK.DYNAMIC_DEPTH LOOP
+                l_nom := UTL_CALL_STACK.SUBPROGRAM(i);
+                IF l_nom(1) <> 'PKG_LOG' THEN
+                  RETURN UTL_CALL_STACK.CONCATENATE_SUBPROGRAM(l_nom);
+                END IF;
+              END LOOP;
+              RETURN NULL;                -- appel direct par CALL pkg_log.info(...)
             END appelant;
 
             PROCEDURE ecrire (p_niveau IN VARCHAR2, p_msg IN VARCHAR2, p_prog IN VARCHAR2) IS
               PRAGMA AUTONOMOUS_TRANSACTION;
+              -- tronqués en PL/SQL : une chaîne de plus de 4 000 octets ne passe pas en SQL
+              l_msg  journal.message%TYPE   := SUBSTRB(p_msg, 1, 4000);
+              l_prog journal.programme%TYPE := SUBSTRB(p_prog, 1, 200);
             BEGIN
               INSERT INTO journal (niveau, programme, message)
-              VALUES (p_niveau, SUBSTR(p_prog, 1, 200), SUBSTRB(p_msg, 1, 4000));
+              VALUES (p_niveau, l_prog, l_msg);
               COMMIT;                     -- valide uniquement la ligne de journal
             END ecrire;
 
@@ -5046,14 +5060,14 @@ flowchart TD
         <div class="output">NIVEAU  PROGRAMME  MESSAGE
 ------  ---------  --------------------
 INFO    DEMO_LOG   début du traitement</div>
-        <p class="hint"><code>appelant</code> est évaluée dans <code>info</code> (comme argument de <code>ecrire</code>), donc la pile vaut <code>appelant</code> (1), <code>info</code> (2), <code>demo_log</code> (3). Depuis un bloc anonyme, le programme serait <code>__anonymous_block</code>. <code>SUBSTRB</code> coupe en octets : un message de 4 000 caractères accentués dépasserait sinon les 4 000 octets de la colonne. <code>erreur</code> s'appelle depuis un gestionnaire d'exception, suivi de <code>RAISE</code>.</p>
+        <p class="hint"><code>appelant</code> est évaluée dans <code>info</code> (comme argument de <code>ecrire</code>), donc la pile vaut <code>appelant</code> (1), <code>info</code> (2), <code>demo_log</code> (3) : la boucle saute les deux niveaux de <code>PKG_LOG</code> et renvoie <code>DEMO_LOG</code>. Depuis un bloc anonyme, le programme serait <code>__anonymous_block</code>. Lire directement <code>SUBPROGRAM(3)</code> marcherait ici, mais lèverait <code>ORA-64610</code> si la pile est moins profonde (ordre SQL <code>CALL pkg_log.info('x')</code>) et donnerait un mauvais résultat si le compilateur intègre (<em>inlining</em>, <code>PLSQL_OPTIMIZE_LEVEL = 3</code>) <code>appelant</code> dans <code>info</code>. <code>SUBSTRB</code> compte en octets et non en caractères : en AL32UTF8, 4 000 caractères accentués dépassent les 4 000 octets de la colonne, alors que <code>SUBSTRB(…, 1, 4000)</code> garantit au plus 4 000 octets. <code>erreur</code> s'appelle depuis un gestionnaire d'exception, suivi de <code>RAISE</code>.</p>
       </details>
     </div>
   </div>
   <div class="ex" data-ex="ch12-e3">
     <div class="ex-head"><h4>Exercice 3 · Diagnostiquer un plan d'exécution</h4><span class="lvl l3">difficile</span></div>
     <div class="ex-body">
-      <p>En production, la table <code>employes</code> contient 2 millions de lignes et <code>historique_salaires</code> 8 millions (index <code>idx_hist_emp</code> sur <code>emp_id</code>). Un batch charge chaque nuit les nouvelles embauches, puis lance cette requête qui prend près de deux minutes :</p>
+      <p>En production, la table <code>employes</code> contient 2 millions de lignes et <code>historique_salaires</code> 8 millions (index <code>idx_hist_emp</code> sur <code>emp_id</code>). Un batch charge chaque nuit les nouvelles embauches (quelques dizaines par nuit), puis lance cette requête qui prend près de deux minutes :</p>
       <script type="text/plsql" data-title="Requête du batch">
         SELECT /*+ GATHER_PLAN_STATISTICS */ e.emp_id, e.nom, h.nouveau_salaire
           FROM employes e JOIN historique_salaires h ON h.emp_id = e.emp_id
@@ -5062,7 +5076,7 @@ INFO    DEMO_LOG   début du traitement</div>
       <p><code>DISPLAY_CURSOR(format => 'ALLSTATS LAST')</code> donne ce plan (simplifié, valeurs d'exemple) :</p>
       <div class="output">| Id | Operation                             | Name                | Starts | E-Rows | A-Rows |
 |  0 | SELECT STATEMENT                      |                     |      1 |        |   180K |
-|  1 |  NESTED LOOPS                         |                     |      1 |      1 |   180K |
+|  1 |  NESTED LOOPS                         |                     |      1 |      4 |   180K |
 |* 2 |   TABLE ACCESS FULL                   | EMPLOYES            |      1 |      1 |  45000 |
 |  3 |   TABLE ACCESS BY INDEX ROWID BATCHED | HISTORIQUE_SALAIRES |  45000 |      4 |   180K |
 |* 4 |    INDEX RANGE SCAN                   | IDX_HIST_EMP        |  45000 |      4 |   180K |</div>
@@ -5075,8 +5089,8 @@ INFO    DEMO_LOG   début du traitement</div>
       <details class="sol"><summary>Voir la solution</summary>
         <ol>
           <li><strong>Ligne 2</strong> : l'optimiseur attend 1 ligne (<code>E-Rows</code>) et en obtient 45 000 (<code>A-Rows</code>), avec <code>Starts = 1</code>. Les lignes 3 et 4, elles, sont justes : 4 lignes estimées par exécution × 45 000 exécutions = 180 000, ce que donne <code>A-Rows</code>. Ne pas comparer <code>E-Rows</code> et <code>A-Rows</code> sans tenir compte de <code>Starts</code>.</li>
-          <li>Croyant n'avoir qu'un employé, l'optimiseur a choisi un <code>NESTED LOOPS</code> : l'index de l'historique est parcouru 45 000 fois (colonne <code>Starts</code>), avec autant d'accès aléatoires à la table. Pour ce volume, une jointure par hachage (<code>HASH JOIN</code>) sur un seul parcours de chaque table aurait été bien plus efficace.</li>
-          <li>Des <strong>statistiques périmées</strong> : elles ont été calculées avant le chargement de la nuit, quand aucun employé n'était embauché après le 1<sup>er</sup> janvier 2024 selon elles. Correction : appeler <code>DBMS_STATS.GATHER_TABLE_STATS(USER, 'EMPLOYES')</code> dans le batch, juste après le chargement. Vérification : relancer la requête et <code>DISPLAY_CURSOR</code>, constater que <code>E-Rows</code> est proche de 45 000 à la ligne 2 et que le plan est passé en <code>HASH JOIN</code>, et comparer <code>A-Time</code>.</li>
+          <li>Croyant n'avoir qu'un employé, l'optimiseur a choisi un <code>NESTED LOOPS</code> : l'index de l'historique est parcouru 45 000 fois (colonne <code>Starts</code>), avec autant d'accès aléatoires à la table. Pour ce volume, une jointure par hachage (<code>HASH JOIN</code>) sur un seul parcours de chaque table aurait en général été plus efficace.</li>
+          <li>Des <strong>statistiques périmées</strong> : celles de <code>employes</code> datent de fin 2023. Les 45 000 embauches chargées depuis ne représentent qu'environ 2 % de la table, sous le seuil de 10 % de modifications au-delà duquel la tâche automatique de statistiques les recalcule. Pour l'optimiseur, la plus grande <code>date_embauche</code> connue est donc antérieure au 1<sup>er</sup> janvier 2024 : le prédicat est hors de la plage connue et il estime environ 1 ligne. Correction : appeler <code>DBMS_STATS.GATHER_TABLE_STATS(USER, 'EMPLOYES')</code> dans le batch, juste après le chargement. Vérification : relancer la requête et <code>DISPLAY_CURSOR</code>, constater que <code>E-Rows</code> est proche de 45 000 à la ligne 2 et que le plan est passé en <code>HASH JOIN</code>, et comparer <code>A-Time</code>.</li>
           <li>Le hint traite le symptôme dans une seule requête, fige le plan même quand les volumes changeront, et laisse les mêmes estimations fausses polluer toutes les autres requêtes sur <code>employes</code>. On corrige d'abord la cause (les statistiques) ; un hint ou une <em>SQL Plan Baseline</em> se discute ensuite, en dernier recours.</li>
         </ol>
         <div class="callout interview"><span class="ct">En entretien</span><p>Raconter ce raisonnement (« j'ai comparé E-Rows et A-Rows, trouvé l'étape où l'estimation décroche, remonté à la cause ») impressionne bien plus que réciter une liste de hints.</p></div>
@@ -5529,8 +5543,8 @@ INFO    DEMO_LOG   début du traitement</div>
           <li><code>SAVE EXCEPTIONS</code> isole les lignes en erreur. <code>ERROR_INDEX</code> est la position dans le <code>FORALL</code> : comme il parcourt <code>1 .. COUNT</code>, c'est aussi l'indice dans <code>l_ids</code>. <code>ERROR_CODE</code> est positif, d'où le <code>-p_code</code> pour <code>SQLERRM</code>.</li>
           <li><code>INDICES OF l_ids</code> parce que <code>l_ids</code> devient creuse ; <code>FORALL i IN 1 .. l_ids.COUNT</code> lèverait ORA-22160. <code>l_anc</code> et <code>l_nouv</code> restent denses : on les lit avec les indices encore présents dans <code>l_ids</code>, qui correspondent toujours à la même ligne. Le <code>FETCH</code> suivant réinitialise les trois collections.</li>
           <li>Le journal est en transaction autonome : son <code>COMMIT</code> ne valide que le journal, qui survit à un éventuel <code>ROLLBACK</code> de l'appelant. <code>SQLERRM</code> ne peut pas être appelé dans un ordre SQL : on passe par une variable.</li>
-          <li><strong>Interactions avec le chapitre 10</strong> : si le trigger <code>trg_employes_audit_sal</code> existe, l'insertion dans l'historique ferait doublon ; il faut choisir l'un ou l'autre. Si <code>trg_sal_plafond</code> rejette une ligne, elle arrive dans <code>SQL%BULK_EXCEPTIONS</code> avec le code 20300, mais <code>SQLERRM(-20300)</code> ne restitue pas le message personnalisé du trigger.</li>
-          <li><strong>Limites assumées</strong> : un employé supprimé par une autre session entre la lecture et l'<code>UPDATE</code> est compté « ok » alors que rien n'a été modifié (on pourrait vérifier <code>SQL%BULK_ROWCOUNT(i)</code>) ; pour se protéger des modifications concurrentes, on ajouterait <code>FOR UPDATE</code> au curseur, au prix d'un verrou sur toutes les lignes ciblées.</li>
+          <li><strong>Interactions avec le chapitre 10</strong> : si le trigger <code>trg_employes_audit_sal</code> existe, l'insertion dans l'historique ferait doublon ; il faut choisir l'un ou l'autre. Si <code>trg_sal_plafond</code> rejette une ligne, elle arrive dans <code>SQL%BULK_EXCEPTIONS</code> avec <code>ERROR_CODE</code> = 20300. Seul le code est conservé : le texte passé à <code>RAISE_APPLICATION_ERROR</code> (« Salaire hors plafond… ») est perdu, et <code>SQLERRM(-20300)</code> ne renvoie qu'un message générique pour ce numéro. Pour garder le texte complet, la clause <code>LOG ERRORS</code> l'enregistre, elle.</li>
+          <li><strong>Limites assumées</strong> : si une autre session supprime (et valide) un employé entre la lecture et l'<code>UPDATE</code>, celui-ci ne touche aucune ligne, sans erreur, puis l'insertion dans l'historique échoue sur la clé étrangère (ORA-02291) et fait échouer tout l'appel : il faudrait tester <code>SQL%BULK_ROWCOUNT(i)</code> avant de tracer ; pour se protéger des modifications concurrentes, on ajouterait <code>FOR UPDATE</code> au curseur, au prix d'un verrou sur toutes les lignes ciblées.</li>
           <li><strong>Alternative SQL pur</strong>, sans gestion fine des erreurs : un <code>INSERT … SELECT</code> dans l'historique puis un seul <code>UPDATE</code> avec la même expression, ou un <code>UPDATE</code> avec la clause <code>LOG ERRORS INTO</code> (table créée par <code>DBMS_ERRLOG.CREATE_ERROR_LOG</code>), qui joue en SQL un rôle proche de <code>SAVE EXCEPTIONS</code>. Sur un million de lignes, c'est souvent la solution la plus rapide : dis-le.</li>
         </ul>
       </details>

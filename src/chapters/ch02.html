@@ -35,7 +35,7 @@
     <thead><tr><th>Type</th><th>À retenir</th></tr></thead>
     <tbody>
       <tr><td><code>NUMBER(p,s)</code></td><td>Décimal exact, précision <code>p</code> jusqu'à 38 chiffres significatifs, <code>s</code> chiffres après la virgule. Type de référence pour les montants. Trop de décimales : arrondi silencieux (<code>NUMBER(8,2)</code> reçoit 3.456, stocke 3.46). Trop de chiffres avant la virgule : <code>ORA-06502</code> en PL/SQL (<code>ORA-01438</code> dans un <code>INSERT</code>).</td></tr>
-      <tr><td><code>PLS_INTEGER</code></td><td>Entier signé 32 bits (±2 147 483 647), plus rapide que <code>NUMBER</code> pour compteurs et indices. Dépassement : <code>ORA-01426: numeric overflow</code>. <code>BINARY_INTEGER</code> est un synonyme depuis 10g. Une valeur décimale affectée est <em>arrondie</em>.</td></tr>
+      <tr><td><code>PLS_INTEGER</code></td><td>Entier signé 32 bits (de -2 147 483 648 à 2 147 483 647), plus rapide que <code>NUMBER</code> pour compteurs et indices. Dépassement : <code>ORA-01426: numeric overflow</code>. <code>BINARY_INTEGER</code> est un synonyme depuis 10g. Une valeur décimale affectée est <em>arrondie</em>.</td></tr>
       <tr><td><code>SIMPLE_INTEGER</code></td><td>(11g) Sous-type de <code>PLS_INTEGER</code>, <code>NOT NULL</code> (valeur initiale obligatoire) et sans contrôle de dépassement : la valeur « boucle » au lieu de lever une erreur. Gain surtout en compilation native.</td></tr>
       <tr><td><code>VARCHAR2(n)</code></td><td>Chaîne de longueur variable, <code>n</code> obligatoire. Jusqu'à 32 767 octets en PL/SQL, mais 4 000 en colonne SQL (32 767 si <code>MAX_STRING_SIZE = EXTENDED</code>, 12c). Par défaut <code>n</code> compte des <strong>octets</strong> : écris <code>VARCHAR2(50 CHAR)</code> pour compter en caractères (un « é » occupe 2 octets en AL32UTF8).</td></tr>
       <tr><td><code>CHAR(n)</code></td><td>Longueur fixe, complétée par des espaces. À éviter : source de comparaisons surprenantes avec un <code>VARCHAR2</code>.</td></tr>
@@ -115,9 +115,9 @@
       DBMS_OUTPUT.PUT_LINE('Mois écoulés    : ' || MONTHS_BETWEEN(l_ref, l_emb));
       DBMS_OUTPUT.PUT_LINE('Fin 6 mois      : ' || TO_CHAR(ADD_MONTHS(l_emb, 6) - 1, 'DD/MM/YYYY'));
       DBMS_OUTPUT.PUT_LINE('31/01 + 1 mois  : ' || TO_CHAR(ADD_MONTHS(DATE '2024-01-31', 1), 'DD/MM/YYYY'));
-      l_duree := l_t2 - l_t1;
-      DBMS_OUTPUT.PUT_LINE('Durée           : ' || l_duree);
-      DBMS_OUTPUT.PUT_LINE('Heures (EXTRACT): ' || EXTRACT(HOUR FROM l_duree));
+      l_duree := l_t2 - l_t1;                                 -- 1 jour, 1 h 30 min 15 s
+      DBMS_OUTPUT.PUT_LINE('Durée           : ' || EXTRACT(DAY FROM l_duree) || ' j '
+        || EXTRACT(HOUR FROM l_duree) || ' h ' || EXTRACT(MINUTE FROM l_duree) || ' min');
     END;
     /
   </script>
@@ -126,15 +126,15 @@ Plus 36 heures  : 02/09/2024 12:00
 Mois écoulés    : 4
 Fin 6 mois      : 28/02/2025
 31/01 + 1 mois  : 29/02/2024
-Durée           : +01 01:30:15
-Heures (EXTRACT): 1</div>
+Durée           : 1 j 1 h 30 min</div>
+  <p class="prose hint">Pour exploiter un <code>INTERVAL</code>, extrais ses composantes avec <code>EXTRACT(DAY | HOUR | MINUTE | SECOND FROM …)</code> : tu obtiens des nombres, indépendants du format d'affichage. Affiché tel quel, un <code>INTERVAL DAY TO SECOND</code> donne une chaîne du type <code>+01 01:30:15</code>, dont le nombre de chiffres dépend de la précision.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Fonction</th><th>Renvoie</th><th>À retenir</th></tr></thead>
     <tbody>
       <tr><td><code>SYSDATE</code> / <code>SYSTIMESTAMP</code></td><td><code>DATE</code> / <code>TIMESTAMP WITH TIME ZONE</code></td><td>Heure du <strong>serveur</strong> (système d'exploitation de la base).</td></tr>
       <tr><td><code>CURRENT_DATE</code> / <code>CURRENT_TIMESTAMP</code></td><td>idem</td><td>Heure dans le fuseau de la <strong>session</strong>.</td></tr>
       <tr><td><code>ADD_MONTHS(d, n)</code></td><td><code>DATE</code></td><td>Si <code>d</code> est le dernier jour du mois, le résultat aussi (31/01 + 1 mois = 29/02 en 2024).</td></tr>
-      <tr><td><code>MONTHS_BETWEEN(d2, d1)</code></td><td><code>NUMBER</code></td><td>Décimal sauf si les deux dates ont le même jour du mois (ou sont deux fins de mois). Ordre des arguments : le plus récent d'abord.</td></tr>
+      <tr><td><code>MONTHS_BETWEEN(d2, d1)</code></td><td><code>NUMBER</code></td><td>Décimal sauf si les deux dates ont le même jour du mois (ou sont deux fins de mois). Ordre des arguments : le plus récent d'abord pour obtenir un résultat positif.</td></tr>
       <tr><td><code>TRUNC(d)</code>, <code>TRUNC(d, 'MM')</code>, <code>LAST_DAY(d)</code></td><td><code>DATE</code></td><td>Minuit du jour, premier du mois, dernier jour du mois.</td></tr>
     </tbody>
   </table></div>
@@ -181,7 +181,7 @@ prime : inconnu</div>
       <tr><td><code>NULL OR FALSE</code></td><td><code>NULL</code></td><td>Le résultat dépend de l'inconnue.</td></tr>
       <tr><td><code>NOT NULL</code> (la valeur)</td><td><code>NULL</code></td><td>L'inverse d'un inconnu reste inconnu.</td></tr>
       <tr><td><code>CASE x WHEN NULL THEN …</code></td><td>jamais choisi</td><td>Le <code>CASE</code> simple compare avec <code>=</code>. Écrire <code>CASE WHEN x IS NULL THEN …</code>.</td></tr>
-      <tr><td><code>x NOT IN (1, NULL)</code></td><td><code>NULL</code> (jamais vrai)</td><td>Piège SQL classique : un <code>NOT IN</code> sur une sous-requête qui renvoie un NULL ne ramène aucune ligne. Préférer <code>NOT EXISTS</code>.</td></tr>
+      <tr><td><code>x NOT IN (1, NULL)</code></td><td><code>NULL</code> ou <code>FALSE</code>, jamais <code>TRUE</code></td><td>Piège SQL classique : un <code>NOT IN</code> sur une sous-requête qui renvoie un NULL ne ramène aucune ligne. Préférer <code>NOT EXISTS</code>.</td></tr>
     </tbody>
   </table></div>
   <div data-stepper="null-if"></div>
@@ -366,7 +366,7 @@ Jours jusqu'au 31/12/2022 : 89</div>
   <h2>Questions d'entretien</h2>
   <details class="qa"><summary>Différence entre VARCHAR2 et CHAR ?</summary><div><p><code>CHAR(n)</code> a une longueur fixe et complète avec des espaces ; <code>VARCHAR2(n)</code> stocke la longueur réelle. Avec <code>CHAR</code>, comparer à une variable <code>VARCHAR2</code> peut échouer à cause des espaces de remplissage. On utilise <code>VARCHAR2</code> sauf cas très particulier. Bonus : la longueur est en octets par défaut, <code>VARCHAR2(n CHAR)</code> la compte en caractères.</p></div></details>
   <details class="qa"><summary>Différence entre NVL et COALESCE ?</summary><div><p><code>NVL(a, b)</code> prend exactement deux arguments et évalue toujours les deux ; si les types diffèrent, il convertit <code>b</code> dans le type de <code>a</code>. <code>COALESCE(a, b, c…)</code> accepte une liste, renvoie la première valeur non nulle et s'arrête dès qu'il la trouve (évaluation en court-circuit, utile si <code>b</code> est un appel de fonction coûteux). Il exige des types compatibles et fait partie du standard SQL ANSI.</p></div></details>
-  <details class="qa"><summary>Pourquoi PLS_INTEGER plutôt que NUMBER pour un compteur ?</summary><div><p><code>PLS_INTEGER</code> utilise l'arithmétique native du processeur alors que <code>NUMBER</code> est une représentation décimale logicielle. Le gain est réel dans les boucles serrées. En contrepartie, la plage est limitée à ±2 147 483 647 (au-delà : <code>ORA-01426</code>) et une valeur décimale est arrondie. <code>SIMPLE_INTEGER</code> va plus loin (pas de NULL, pas de contrôle de dépassement).</p></div></details>
+  <details class="qa"><summary>Pourquoi PLS_INTEGER plutôt que NUMBER pour un compteur ?</summary><div><p><code>PLS_INTEGER</code> utilise l'arithmétique native du processeur alors que <code>NUMBER</code> est une représentation décimale logicielle. Le gain est réel dans les boucles serrées. En contrepartie, la plage est limitée à 32 bits signés (de -2 147 483 648 à 2 147 483 647) (au-delà : <code>ORA-01426</code>) et une valeur décimale est arrondie. <code>SIMPLE_INTEGER</code> va plus loin (pas de NULL, pas de contrôle de dépassement).</p></div></details>
   <details class="qa"><summary>DATE ou TIMESTAMP : lequel choisir ?</summary><div><p>Les deux contiennent date et heure. <code>DATE</code> s'arrête à la seconde, n'a pas de fuseau, et la soustraction de deux dates donne un nombre de jours. <code>TIMESTAMP</code> ajoute les fractions de seconde (et le fuseau avec <code>WITH TIME ZONE</code>) ; la soustraction donne un <code>INTERVAL DAY TO SECOND</code>. On prend <code>DATE</code> pour une date métier (embauche, échéance) et <code>TIMESTAMP</code> pour un horodatage technique (journal, ordre d'événements rapprochés, données multi-fuseaux). Dans les deux cas, attention à l'heure cachée lors des comparaisons d'égalité.</p></div></details>
   <details class="qa"><summary>Comment détecter qu'une valeur a changé quand elle peut être NULL ?</summary><div><p><code>l_ancien != l_nouveau</code> vaut NULL dès qu'un des deux est NULL, donc le passage de NULL à 500 passe inaperçu. Il faut traiter les cas NULL explicitement : <code>l_ancien != l_nouveau OR (l_ancien IS NULL AND l_nouveau IS NOT NULL) OR (l_ancien IS NOT NULL AND l_nouveau IS NULL)</code>. En SQL, <code>DECODE(a, b, 0, 1) = 1</code> fait la même chose car <code>DECODE</code> considère deux NULL comme égaux, mais il n'est pas disponible directement en PL/SQL. Cas typique : un trigger d'audit (<a href="#ch10">chapitre 10</a>).</p></div></details>
 </section>

@@ -21,7 +21,7 @@
   </table></div>
   <p class="prose">Déroule un <code>UPDATE</code> qui touche deux lignes : l'ordre de déclenchement est toujours le même.</p>
   <div data-stepper="trigger-order"></div>
-  <p class="prose">Les quatre triggers de l'animation sont des jouets : après l'essai, fais <code>ROLLBACK</code> puis <code>DROP TRIGGER t_bs;</code>, <code>t_br</code>, <code>t_ar</code> et <code>t_as</code>, sinon ils parleront à chaque <code>UPDATE</code> des chapitres suivants.</p>
+  <p class="prose">Les quatre triggers de l'animation sont des jouets : après l'essai, fais <code>ROLLBACK</code> puis supprime-les (<code>DROP TRIGGER t_bs;</code>, et de même pour <code>t_br</code>, <code>t_ar</code> et <code>t_as</code>), sinon ils parleront à chaque <code>UPDATE</code> des chapitres suivants.</p>
   <div class="diagram"><pre class="mermaid">
 flowchart TD
   A["Ordre DML (INSERT, UPDATE, DELETE)"] --> B["BEFORE STATEMENT<br/>une seule fois"]
@@ -70,7 +70,7 @@ flowchart TD
   </script>
   <div class="callout pitfall"><span class="ct">Piège</span><p><code>UPDATE OF salaire</code> déclenche le trigger dès que <code>salaire</code> figure dans le <code>SET</code>, <strong>même si la valeur ne change pas</strong> (<code>SET salaire = salaire</code>, ou un écran qui renvoie toutes les colonnes). D'où la clause <code>WHEN</code>. Dans <code>WHEN</code>, on écrit <code>NEW</code> et <code>OLD</code> <strong>sans</strong> deux-points ; dans le corps, <code>:NEW</code> et <code>:OLD</code>. <code>WHEN</code> n'existe que pour les triggers de ligne.</p></div>
   <p class="prose">Un même trigger peut couvrir plusieurs événements : les prédicats <code>INSERTING</code>, <code>UPDATING</code> et <code>DELETING</code> indiquent lequel est en cours. Ici, un trigger d'<strong>instruction</strong> qui interdit toute modification des départements hors des heures de bureau.</p>
-  <div class="callout pitfall"><span class="ct">Avant de l'exécuter</span><p>Si tu révises le soir (après 19 h 59) ou avant 8 h, ce trigger bloquera <strong>tout</strong> <code>INSERT</code>, <code>UPDATE</code> ou <code>DELETE</code> sur <code>departements</code>, y compris le script du <a href="#ch00">chapitre 00</a> qui recrée le schéma. Supprime-le dès que tu l'as essayé (dernière ligne du bloc).</p></div>
+  <div class="callout pitfall"><span class="ct">Avant de l'exécuter</span><p>Si tu révises le soir (après 19 h 59) ou avant 8 h (heure du <strong>serveur</strong>, car <code>SYSDATE</code> suit son horloge), ce trigger bloquera <strong>tout</strong> <code>INSERT</code>, <code>UPDATE</code> ou <code>DELETE</code> sur <code>departements</code> tant qu'il existe, y compris dans les exemples des chapitres suivants. Supprime-le dès que tu l'as essayé (dernière ligne du bloc).</p></div>
   <script type="text/plsql" data-title="Un trigger pour plusieurs événements">
     CREATE OR REPLACE TRIGGER trg_departements_controle
       BEFORE INSERT OR UPDATE OR DELETE ON departements
@@ -155,7 +155,9 @@ ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
 
       AFTER EACH ROW IS
       BEGIN
-        g_depts(:NEW.dept_id) := TRUE;                      -- on note seulement le département
+        IF :NEW.dept_id IS NOT NULL THEN                    -- une clé NULL lèverait ORA-06502
+          g_depts(:NEW.dept_id) := TRUE;                    -- on note seulement le département
+        END IF;
       END AFTER EACH ROW;
 
       AFTER STATEMENT IS
@@ -176,11 +178,11 @@ ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
     END trg_sal_plafond;
     /
     UPDATE employes SET salaire = salaire * 1.01 WHERE dept_id = 20;   -- passe désormais
-    UPDATE employes SET salaire = 40000 WHERE emp_id = 109;            -- moyenne 12 040, plafond 36 120
+    UPDATE employes SET salaire = 40000 WHERE emp_id = 109;            -- moyenne 12 080,4 ; plafond 36 241,2
     ROLLBACK;
   </script>
   <div class="output">ORA-20300: Salaire hors plafond dans le département 20</div>
-  <p class="prose">Le premier <code>UPDATE</code> réussit. Le second échoue (la pile se poursuit avec <code>ORA-06512</code> et <code>ORA-04088</code>) et seul cet ordre est annulé. Les variables déclarées en tête d'un trigger composé sont réinitialisées à chaque ordre DML : pas de fuite d'un ordre à l'autre, contrairement à une variable de package.</p>
+  <p class="prose">Le premier <code>UPDATE</code> réussit. Le second est évalué sur les salaires déjà augmentés de 1 % : moyenne (7 272 + 4 343 + 3 939 + 4 848 + 40 000) / 5 = 12 080,4, plafond 36 241,2. Il échoue donc (la pile se poursuit avec <code>ORA-06512</code> et <code>ORA-04088</code>) et seul cet ordre est annulé. Les variables déclarées en tête d'un trigger composé sont réinitialisées à chaque ordre DML : pas de fuite d'un ordre à l'autre, contrairement à une variable de package.</p>
   <div class="callout tip"><span class="ct">Autres solutions à citer</span><p>Avant 11g : un package avec une collection, un trigger de ligne qui la remplit et un trigger d'instruction qui la traite. Souvent, la meilleure réponse est de <strong>sortir la règle du trigger</strong> : la mettre dans la procédure d'API qui fait la mise à jour, ou dans une contrainte déclarative quand c'est possible.</p></div>
 
   <h2>Bonnes pratiques</h2>
@@ -212,7 +214,7 @@ ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
                 OR (NEW.salaire IS NULL AND OLD.salaire IS NOT NULL)
                 OR (NEW.salaire IS NOT NULL AND OLD.salaire IS NULL))
         </script>
-        <p class="hint">Variante compacte, déjà vue au <a href="#ch02">chapitre 02</a> : <code>WHEN (DECODE(NEW.salaire, OLD.salaire, 0, 1) = 1)</code>, car <code>DECODE</code> considère deux NULL comme égaux.</p>
+        <p class="hint">Variante compacte, déjà vue au <a href="#ch02">chapitre 02</a> : <code>WHEN (DECODE(NEW.salaire, OLD.salaire, 0, 1) = 1)</code>, car <code>DECODE</code> considère deux NULL comme égaux. C'est permis ici parce que la clause <code>WHEN</code> est une condition <strong>SQL</strong> : fonctions SQL intégrées autorisées, mais ni sous-requête ni appel de fonction PL/SQL.</p>
       </details>
     </div>
   </div>
