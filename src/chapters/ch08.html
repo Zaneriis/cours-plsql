@@ -1,0 +1,265 @@
+<!-- ===================================================== CH 08 ===================================================== -->
+<section class="chapter" id="ch08" data-num="08" data-group="Programmation modulaire" data-min="70" data-title="Records et collections" data-desc="Records, tableaux associatifs, tables imbriquées, VARRAY, méthodes, collections en SQL et MULTISET." hidden>
+  <p class="eyebrow">Chapitre 08 · 70 min</p>
+  <h1>Records et collections</h1>
+  <p class="lead">Les collections sont les tableaux de PL/SQL. Elles sont indispensables pour le traitement en masse (chapitre 09) et reviennent souvent dans les questions « quelle différence entre… ».</p>
+  <ul class="goals">
+    <li>déclarer des records et les manipuler en bloc ;</li>
+    <li>choisir entre tableau associatif, table imbriquée et VARRAY ;</li>
+    <li>utiliser les méthodes <code>COUNT</code>, <code>FIRST</code>, <code>NEXT</code>, <code>EXISTS</code>, <code>EXTEND</code>, <code>DELETE</code> ;</li>
+    <li>interroger une collection en SQL avec <code>TABLE()</code>.</li>
+  </ul>
+
+  <h2>Records</h2>
+  <script type="text/plsql" data-title="Trois façons d'avoir un record">
+    DECLARE
+      r_emp  employes%ROWTYPE;                          -- forme d'une table
+      CURSOR c IS SELECT e.nom, d.nom AS dept FROM employes e JOIN departements d USING (dept_id);
+      r_c    c%ROWTYPE;                                 -- forme d'un curseur
+      TYPE t_paie IS RECORD (                           -- forme libre
+        emp_id   employes.emp_id%TYPE,
+        brut     NUMBER(10,2),
+        net      NUMBER(10,2) := 0
+      );
+      r_paie t_paie;
+    BEGIN
+      SELECT * INTO r_emp FROM employes WHERE emp_id = 102;
+      r_paie.emp_id := r_emp.emp_id;
+      r_paie.brut   := r_emp.salaire;
+      r_paie.net    := ROUND(r_paie.brut * 0.78, 2);
+      DBMS_OUTPUT.PUT_LINE(r_emp.nom || ' net : ' || r_paie.net);
+
+      r_emp.emp_id := 300; r_emp.nom := 'Copie';
+      INSERT INTO employes VALUES r_emp;                -- insertion d'un record entier
+      UPDATE employes SET ROW = r_emp WHERE emp_id = 300; -- mise à jour de toute la ligne
+      ROLLBACK;
+    END;
+    /
+  </script>
+
+  <h2>Les trois types de collections</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th></th><th>Tableau associatif</th><th>Table imbriquée</th><th>VARRAY</th></tr></thead>
+    <tbody>
+      <tr><td>Déclaration</td><td><code>TABLE OF t INDEX BY PLS_INTEGER | VARCHAR2(n)</code></td><td><code>TABLE OF t</code></td><td><code>VARRAY(n) OF t</code></td></tr>
+      <tr><td>Initialisation</td><td>Aucune, utilisable directement</td><td>Constructeur obligatoire, puis <code>EXTEND</code></td><td>Constructeur obligatoire, puis <code>EXTEND</code></td></tr>
+      <tr><td>Taille</td><td>Illimitée</td><td>Illimitée</td><td>Maximum fixé à la déclaration</td></tr>
+      <tr><td>Indices</td><td>Entiers quelconques (même négatifs) ou chaînes ; creux possible</td><td>1..n, dense au départ, peut devenir creuse après <code>DELETE</code></td><td>1..n, toujours dense</td></tr>
+      <tr><td>Type SQL (<code>CREATE TYPE</code>)</td><td>Non, PL/SQL uniquement</td><td>Oui : colonne de table, <code>TABLE()</code>, <code>MULTISET</code></td><td>Oui : colonne de table, ordre conservé</td></tr>
+      <tr><td>Usage typique</td><td>Cache, tableau de recherche par clé, <code>BULK COLLECT</code></td><td>Échanges avec SQL, opérations ensemblistes</td><td>Petite liste ordonnée de taille bornée</td></tr>
+    </tbody>
+  </table></div>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TD
+  Q1{"Besoin de la collection<br/>dans une requête SQL<br/>ou une colonne de table ?"} -- non --> Q2{"Indexer par une clé<br/>texte ou des entiers épars ?"}
+  Q2 -- "oui ou peu importe" --> AA["Tableau associatif<br/>INDEX BY"]
+  Q1 -- oui --> Q3{"Taille maximale connue<br/>et ordre à conserver ?"}
+  Q3 -- oui --> VA["VARRAY"]
+  Q3 -- non --> NT["Table imbriquée<br/>(CREATE TYPE ... AS TABLE OF)"]
+    </pre>
+    <p class="cap">Arbre de décision simple pour choisir une collection.</p>
+  </div>
+
+  <h3>Tableau associatif</h3>
+  <script type="text/plsql" data-title="Indexé par une chaîne">
+    DECLARE
+      TYPE t_compteur IS TABLE OF PLS_INTEGER INDEX BY VARCHAR2(30);
+      l_par_poste t_compteur;
+      l_cle VARCHAR2(30);
+    BEGIN
+      FOR r IN (SELECT poste FROM employes) LOOP
+        IF l_par_poste.EXISTS(r.poste) THEN
+          l_par_poste(r.poste) := l_par_poste(r.poste) + 1;
+        ELSE
+          l_par_poste(r.poste) := 1;
+        END IF;
+      END LOOP;
+
+      l_cle := l_par_poste.FIRST;                -- parcours dans l'ordre des clés
+      WHILE l_cle IS NOT NULL LOOP
+        DBMS_OUTPUT.PUT_LINE(RPAD(l_cle, 12) || l_par_poste(l_cle));
+        l_cle := l_par_poste.NEXT(l_cle);
+      END LOOP;
+    END;
+    /
+  </script>
+  <div class="output">COMMERCIAL  3
+DBA         1
+DEV         2
+DG          1
+DIR_IT      1
+DIR_VENTES  1
+STAGIAIRE   1</div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Lire un élément qui n'existe pas dans un tableau associatif lève <code>NO_DATA_FOUND</code>, la même exception qu'un <code>SELECT INTO</code> vide. Teste avec <code>EXISTS</code> avant de lire.</p></div>
+
+  <h3>Table imbriquée et VARRAY</h3>
+  <script type="text/plsql" data-title="Initialisation obligatoire">
+    DECLARE
+      TYPE t_noms  IS TABLE OF VARCHAR2(50);
+      TYPE t_top3  IS VARRAY(3) OF VARCHAR2(50);
+      l_noms t_noms;                              -- NULL atomique : pas encore une collection
+      l_top  t_top3 := t_top3();                  -- collection vide initialisée
+    BEGIN
+      -- l_noms.EXTEND;  => ORA-06531: Reference to uninitialized collection
+      l_noms := t_noms('Petit', 'Durand');        -- constructeur
+      l_noms.EXTEND;                              -- ajoute une case NULL
+      l_noms(l_noms.LAST) := 'Leroy';
+
+      l_top.EXTEND(3);
+      l_top(1) := 'Martin';
+      -- l_top.EXTEND;   => ORA-06532: Subscript outside of limit
+
+      l_noms.DELETE(2);                           -- la table devient creuse : indices 1 et 3
+      DBMS_OUTPUT.PUT_LINE('COUNT=' || l_noms.COUNT || ' LAST=' || l_noms.LAST);
+      FOR i IN 1 .. l_noms.LAST LOOP
+        IF l_noms.EXISTS(i) THEN DBMS_OUTPUT.PUT_LINE(i || ' ' || l_noms(i)); END IF;
+      END LOOP;
+    END;
+    /
+  </script>
+  <div class="output">COUNT=2 LAST=3
+1 Petit
+3 Leroy</div>
+
+  <h3>Les méthodes</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Méthode</th><th>Rôle</th></tr></thead>
+    <tbody>
+      <tr><td><code>COUNT</code></td><td>Nombre d'éléments existants</td></tr>
+      <tr><td><code>FIRST</code> / <code>LAST</code></td><td>Plus petit / plus grand indice (<code>NULL</code> si vide)</td></tr>
+      <tr><td><code>NEXT(i)</code> / <code>PRIOR(i)</code></td><td>Indice suivant / précédent existant : la bonne façon de parcourir une collection creuse</td></tr>
+      <tr><td><code>EXISTS(i)</code></td><td>L'élément i existe-t-il ? Ne lève jamais d'exception</td></tr>
+      <tr><td><code>EXTEND(n)</code></td><td>Ajoute n cases (tables imbriquées, VARRAY)</td></tr>
+      <tr><td><code>TRIM(n)</code></td><td>Supprime n éléments à la fin</td></tr>
+      <tr><td><code>DELETE</code> / <code>DELETE(i)</code> / <code>DELETE(i, j)</code></td><td>Supprime tout / un élément / une plage (pas sur VARRAY sauf tout)</td></tr>
+      <tr><td><code>LIMIT</code></td><td>Taille maximale d'un VARRAY (NULL pour les autres)</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout pitfall"><span class="ct">Piège : FOR i IN 1 .. c.COUNT</span><p>Sur une collection creuse, cette boucle lit des indices qui n'existent pas (<code>NO_DATA_FOUND</code>) et rate les derniers. Utilise <code>FIRST</code> / <code>NEXT</code>, ou garantis que la collection est dense (cas d'un <code>BULK COLLECT</code>). Et si la collection est vide, <code>FOR i IN c.FIRST .. c.LAST</code> échoue : <code>FIRST</code> est NULL.</p></div>
+
+  <h2>Collections en SQL</h2>
+  <p class="prose">Un type créé au niveau schéma (<code>CREATE TYPE</code>) est connu du moteur SQL : on peut interroger une collection comme une table avec <code>TABLE()</code> et utiliser les opérateurs ensemblistes <code>MULTISET</code>.</p>
+  <script type="text/plsql" data-title="TABLE() et MULTISET">
+    CREATE OR REPLACE TYPE t_liste_id AS TABLE OF NUMBER;
+    /
+
+    DECLARE
+      l_a t_liste_id := t_liste_id(101, 102, 103, 103);
+      l_b t_liste_id := t_liste_id(103, 104);
+      l_u t_liste_id;
+    BEGIN
+      l_u := l_a MULTISET UNION DISTINCT l_b;           -- 101 102 103 104
+      DBMS_OUTPUT.PUT_LINE('Union : ' || l_u.COUNT || ' éléments');
+      DBMS_OUTPUT.PUT_LINE('Intersection : ' || CARDINALITY(l_a MULTISET INTERSECT DISTINCT l_b));
+      IF 104 MEMBER OF l_b THEN DBMS_OUTPUT.PUT_LINE('104 est dans B'); END IF;
+
+      FOR r IN (SELECT e.nom
+                  FROM employes e
+                  JOIN TABLE(l_u) t ON t.column_value = e.emp_id) LOOP    -- la collection devient une table
+        DBMS_OUTPUT.PUT_LINE(r.nom);
+      END LOOP;
+    END;
+    /
+  </script>
+  <div class="callout tip"><span class="ct">Astuce : expressions qualifiées (18c)</span><p>On peut initialiser un tableau associatif d'un coup : <code>l_t := t_compteur('DEV' => 2, 'DBA' => 1);</code> ou un record : <code>r := t_paie(emp_id => 1, brut => 3000, net => 2340);</code>.</p></div>
+
+  <h2>Exercices</h2>
+  <div class="ex" data-ex="ch08-e1">
+    <div class="ex-head"><h4>Exercice 1 · Masse salariale par ville</h4><span class="lvl l1">facile</span></div>
+    <div class="ex-body">
+      <p>Avec un tableau associatif indexé par la ville, cumule les salaires des employés (une seule requête de jointure dans une boucle <code>FOR</code>), puis affiche les villes dans l'ordre alphabétique.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            TYPE t_masse IS TABLE OF NUMBER INDEX BY departements.ville%TYPE;
+            l_m   t_masse;
+            l_v   departements.ville%TYPE;
+          BEGIN
+            FOR r IN (SELECT d.ville, e.salaire FROM employes e JOIN departements d ON d.dept_id = e.dept_id) LOOP
+              l_m(r.ville) := CASE WHEN l_m.EXISTS(r.ville) THEN l_m(r.ville) ELSE 0 END + r.salaire;
+            END LOOP;
+            l_v := l_m.FIRST;
+            WHILE l_v IS NOT NULL LOOP
+              DBMS_OUTPUT.PUT_LINE(l_v || ' : ' || l_m(l_v));
+              l_v := l_m.NEXT(l_v);
+            END LOOP;
+          END;
+          /
+        </script>
+        <div class="output">Lille : 15800
+Lyon : 21600
+Paris : 9500</div>
+        <p class="hint">En vrai projet, un simple <code>GROUP BY</code> ferait le travail. L'exercice sert à manipuler la structure.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch08-e2">
+    <div class="ex-head"><h4>Exercice 2 · Parcourir une collection creuse</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Remplis une table imbriquée avec les nombres de 1 à 10, supprime les éléments pairs avec <code>DELETE(i)</code>, puis affiche les éléments restants de deux façons : avec <code>FIRST</code>/<code>NEXT</code>, et avec une boucle <code>FOR</code> + <code>EXISTS</code>. Affiche aussi <code>COUNT</code> et <code>LAST</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            TYPE t_nb IS TABLE OF PLS_INTEGER;
+            l t_nb := t_nb();
+            i PLS_INTEGER;
+          BEGIN
+            FOR k IN 1 .. 10 LOOP l.EXTEND; l(k) := k; END LOOP;
+            FOR k IN 1 .. 10 LOOP IF MOD(k, 2) = 0 THEN l.DELETE(k); END IF; END LOOP;
+
+            DBMS_OUTPUT.PUT_LINE('COUNT=' || l.COUNT || ' LAST=' || l.LAST);   -- COUNT=5 LAST=9
+
+            i := l.FIRST;
+            WHILE i IS NOT NULL LOOP
+              DBMS_OUTPUT.PUT(l(i) || ' ');
+              i := l.NEXT(i);
+            END LOOP;
+            DBMS_OUTPUT.NEW_LINE;
+
+            FOR k IN 1 .. l.LAST LOOP
+              CONTINUE WHEN NOT l.EXISTS(k);
+              DBMS_OUTPUT.PUT(l(k) || ' ');
+            END LOOP;
+            DBMS_OUTPUT.NEW_LINE;
+          END;
+          /
+        </script>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch08-e3">
+    <div class="ex-head"><h4>Exercice 3 · Différence d'équipes</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Avec le type SQL <code>t_liste_id</code>, construis la liste des employés du département 20 et celle des employés qui gagnent plus de 4 000 (avec <code>BULK COLLECT</code>, que tu découvriras au chapitre suivant, ou une boucle). Affiche les noms des employés du 20 qui gagnent 4 000 ou moins en utilisant <code>MULTISET EXCEPT</code> et <code>TABLE()</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            l_dept20 t_liste_id;
+            l_riches t_liste_id;
+          BEGIN
+            SELECT emp_id BULK COLLECT INTO l_dept20 FROM employes WHERE dept_id = 20;
+            SELECT emp_id BULK COLLECT INTO l_riches FROM employes WHERE salaire > 4000;
+
+            FOR r IN (SELECT nom FROM employes
+                       WHERE emp_id IN (SELECT column_value FROM TABLE(l_dept20 MULTISET EXCEPT l_riches))
+                       ORDER BY nom) LOOP
+              DBMS_OUTPUT.PUT_LINE(r.nom);
+            END LOOP;
+          END;
+          /
+        </script>
+        <div class="output">Durand
+Garcia</div>
+      </details>
+    </div>
+  </div>
+
+  <h2>Quiz</h2>
+  <div data-quiz="ch08"></div>
+
+  <h2>Questions d'entretien</h2>
+  <details class="qa"><summary>Quelles sont les différences entre les trois types de collections ?</summary><div><p>Le tableau associatif est purement PL/SQL, sans initialisation, indexé par entier ou chaîne, creux possible. La table imbriquée doit être initialisée, peut devenir creuse et peut être un type SQL (colonne, <code>TABLE()</code>, <code>MULTISET</code>). Le VARRAY a une taille maximale, reste dense, conserve l'ordre et peut aussi être un type SQL.</p></div></details>
+  <details class="qa"><summary>Que signifie ORA-06531 ?</summary><div><p>« Reference to uninitialized collection » : on utilise une table imbriquée ou un VARRAY qui n'a pas été initialisé par son constructeur. Correctif : <code>l := t_type();</code> avant <code>EXTEND</code>.</p></div></details>
+  <details class="qa"><summary>Différence entre COUNT et LAST ?</summary><div><p><code>COUNT</code> est le nombre d'éléments présents ; <code>LAST</code> est le plus grand indice utilisé. Ils sont égaux pour une collection dense indexée à partir de 1, différents dès qu'elle est creuse.</p></div></details>
+</section>

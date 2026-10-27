@@ -1,0 +1,163 @@
+<!-- ===================================================== CH 00 ===================================================== -->
+<section class="chapter" id="ch00" data-num="00" data-group="Démarrer" data-min="30" data-title="Préparer son environnement" data-desc="Une base Oracle gratuite, les outils, et le schéma RH utilisé dans tous les exemples." hidden>
+  <p class="eyebrow">Chapitre 00 · 30 min</p>
+  <h1>Préparer son environnement</h1>
+  <p class="lead">On apprend PL/SQL en l'exécutant. Avant tout, il te faut une base Oracle et le petit schéma « ressources humaines » sur lequel s'appuient tous les exemples et exercices.</p>
+  <ul class="goals">
+    <li>disposer d'une base Oracle gratuite (en ligne ou en local) ;</li>
+    <li>créer les tables <code>departements</code>, <code>employes</code>, <code>journal_erreurs</code> et <code>historique_salaires</code> ;</li>
+    <li>activer l'affichage de <code>DBMS_OUTPUT</code> dans ton outil.</li>
+  </ul>
+
+  <h2>Trois façons d'avoir une base Oracle</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Option</th><th>Pour qui</th><th>Comment</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Oracle Live SQL</strong></td><td>Rien à installer, idéal pour démarrer</td><td>Va sur <a href="https://livesql.oracle.com" target="_blank" rel="noopener">livesql.oracle.com</a>, connecte-toi avec un compte Oracle gratuit, colle le script ci-dessous dans le « SQL Worksheet ».</td></tr>
+      <tr><td><strong>Oracle Database Free (Docker)</strong></td><td>Tu as Docker et tu veux une vraie base locale</td><td><code>docker run -d --name oracle -p 1521:1521 -e ORACLE_PASSWORD=MotDePasse1 gvenzl/oracle-free</code> puis connexion avec l'utilisateur <code>system</code> sur le service <code>FREEPDB1</code>.</td></tr>
+      <tr><td><strong>Oracle Cloud Free Tier</strong></td><td>Tu veux une base autonome hébergée</td><td>Crée une « Autonomous Database » toujours gratuite et utilise « Database Actions › SQL » dans le navigateur.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose">Côté client, <strong>SQL Developer</strong> (gratuit) ou l'extension <strong>Oracle SQL Developer for VS Code</strong> font très bien l'affaire. En entretien, on te montrera souvent SQL Developer ou Toad : sache où trouver la fenêtre de sortie <code>DBMS_OUTPUT</code> et le panneau des erreurs de compilation.</p>
+
+  <h2>Activer la sortie</h2>
+  <p class="prose"><code>DBMS_OUTPUT.PUT_LINE</code> écrit dans un tampon côté serveur. Le client ne l'affiche que si tu le lui demandes :</p>
+  <script type="text/plsql" data-title="SQL*Plus / SQL Developer / SQLcl">
+    SET SERVEROUTPUT ON SIZE UNLIMITED
+
+    BEGIN
+      DBMS_OUTPUT.PUT_LINE('Bonjour depuis PL/SQL !');
+    END;
+    /
+  </script>
+  <div class="output">Bonjour depuis PL/SQL !</div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Le <code>/</code> seul sur sa ligne n'est pas du PL/SQL : c'est l'ordre donné à SQL*Plus (ou SQL Developer en mode script) d'envoyer le bloc au serveur. Sans lui, un script de plusieurs blocs ne s'exécute pas ou s'exécute mal.</p></div>
+
+  <h2>Le schéma d'exemple</h2>
+  <p class="prose">Une petite entreprise : quatre départements (dont un vide, très utile pour provoquer des erreurs), dix employés avec une hiérarchie, une table de journalisation d'erreurs et un historique des salaires alimenté plus tard par un trigger.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+erDiagram
+  DEPARTEMENTS ||--o{ EMPLOYES : "emploie"
+  EMPLOYES ||--o{ EMPLOYES : "manage"
+  EMPLOYES ||--o{ HISTORIQUE_SALAIRES : "a"
+  DEPARTEMENTS {
+    NUMBER dept_id PK
+    VARCHAR2 nom
+    VARCHAR2 ville
+  }
+  EMPLOYES {
+    NUMBER emp_id PK
+    VARCHAR2 nom
+    VARCHAR2 prenom
+    VARCHAR2 poste
+    NUMBER salaire
+    NUMBER commission
+    DATE date_embauche
+    NUMBER dept_id FK
+    NUMBER manager_id FK
+  }
+  HISTORIQUE_SALAIRES {
+    NUMBER emp_id FK
+    NUMBER ancien_salaire
+    NUMBER nouveau_salaire
+    DATE date_modif
+    VARCHAR2 modifie_par
+  }
+  JOURNAL_ERREURS {
+    NUMBER id PK
+    TIMESTAMP date_err
+    VARCHAR2 programme
+    NUMBER code
+    VARCHAR2 message
+  }
+    </pre>
+    <p class="cap">Modèle de données utilisé dans tout le cours.</p>
+  </div>
+
+  <script type="text/plsql" data-title="schema_rh.sql — à exécuter une fois">
+    -- Nettoyage si tu relances le script (ignore les erreurs ORA-00942 au premier passage)
+    DROP TABLE historique_salaires PURGE;
+    DROP TABLE journal_erreurs PURGE;
+    DROP TABLE employes PURGE;
+    DROP TABLE departements PURGE;
+
+    CREATE TABLE departements (
+      dept_id  NUMBER(4)    PRIMARY KEY,
+      nom      VARCHAR2(50) NOT NULL,
+      ville    VARCHAR2(50)
+    );
+
+    CREATE TABLE employes (
+      emp_id         NUMBER(6)    PRIMARY KEY,
+      nom            VARCHAR2(50) NOT NULL,
+      prenom         VARCHAR2(50),
+      poste          VARCHAR2(30),
+      salaire        NUMBER(8,2)  CONSTRAINT ck_emp_salaire CHECK (salaire > 0),
+      commission     NUMBER(8,2),
+      date_embauche  DATE DEFAULT SYSDATE,
+      dept_id        NUMBER(4)    REFERENCES departements,
+      manager_id     NUMBER(6)    REFERENCES employes
+    );
+
+    CREATE TABLE journal_erreurs (
+      id         NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      date_err   TIMESTAMP DEFAULT SYSTIMESTAMP,
+      programme  VARCHAR2(100),
+      code       NUMBER,
+      message    VARCHAR2(4000),
+      backtrace  VARCHAR2(4000)
+    );
+
+    CREATE TABLE historique_salaires (
+      emp_id           NUMBER(6) REFERENCES employes,
+      ancien_salaire   NUMBER(8,2),
+      nouveau_salaire  NUMBER(8,2),
+      date_modif       DATE DEFAULT SYSDATE,
+      modifie_par      VARCHAR2(128) DEFAULT USER
+    );
+
+    CREATE SEQUENCE seq_employes START WITH 200;
+
+    INSERT INTO departements VALUES (10, 'Direction',    'Paris');
+    INSERT INTO departements VALUES (20, 'Informatique', 'Lyon');
+    INSERT INTO departements VALUES (30, 'Ventes',       'Lille');
+    INSERT INTO departements VALUES (40, 'RH',           'Nantes');  -- aucun employé
+
+    INSERT INTO employes VALUES (100, 'Martin',  'Claire',  'DG',         9500, NULL, DATE '2015-03-01', 10, NULL);
+    INSERT INTO employes VALUES (101, 'Bernard', 'Hugo',    'DIR_IT',     7200, NULL, DATE '2016-06-15', 20, 100);
+    INSERT INTO employes VALUES (105, 'Moreau',  'Lucas',   'DIR_VENTES', 6800, NULL, DATE '2017-02-01', 30, 100);
+    INSERT INTO employes VALUES (102, 'Petit',   'Sarah',   'DEV',        4300, NULL, DATE '2019-09-02', 20, 101);
+    INSERT INTO employes VALUES (103, 'Durand',  'Karim',   'DEV',        3900, NULL, DATE '2021-01-11', 20, 101);
+    INSERT INTO employes VALUES (104, 'Leroy',   'Emma',    'DBA',        4800, NULL, DATE '2018-04-23', 20, 101);
+    INSERT INTO employes VALUES (106, 'Simon',   'Julie',   'COMMERCIAL', 3100,  450, DATE '2020-05-18', 30, 105);
+    INSERT INTO employes VALUES (107, 'Laurent', 'Nicolas', 'COMMERCIAL', 2900,  600, DATE '2022-10-03', 30, 105);
+    INSERT INTO employes VALUES (108, 'Michel',  'Inès',    'COMMERCIAL', 3000, NULL, DATE '2023-02-20', 30, 105);
+    INSERT INTO employes VALUES (109, 'Garcia',  'Tom',     'STAGIAIRE',  1400, NULL, DATE '2024-09-01', 20, 102);
+    COMMIT;
+  </script>
+  <div class="callout tip"><span class="ct">Astuce</span><p>Garde ce script sous la main. Beaucoup d'exercices modifient les données : relance-le pour repartir d'un état propre. Sur Live SQL, les tables disparaissent à la fin de la session.</p></div>
+
+  <h2>Vérifier que tout fonctionne</h2>
+  <div class="ex" data-ex="ch00-e1">
+    <div class="ex-head"><h4>Exercice 1 · Premier contact</h4><span class="lvl l1">facile</span></div>
+    <div class="ex-body">
+      <p>Écris un bloc anonyme qui affiche le nombre d'employés et la masse salariale totale, au format <code>10 employés, masse salariale : 46900</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            l_nb     PLS_INTEGER;
+            l_masse  NUMBER;
+          BEGIN
+            SELECT COUNT(*), SUM(salaire)
+              INTO l_nb, l_masse
+              FROM employes;
+            DBMS_OUTPUT.PUT_LINE(l_nb || ' employés, masse salariale : ' || l_masse);
+          END;
+          /
+        </script>
+        <p class="hint">Si rien ne s'affiche, c'est presque toujours que <code>SET SERVEROUTPUT ON</code> n'a pas été exécuté dans la session.</p>
+      </details>
+    </div>
+  </div>
+</section>

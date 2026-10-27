@@ -1,0 +1,269 @@
+<!-- ===================================================== CH 09 ===================================================== -->
+<section class="chapter" id="ch09" data-num="09" data-group="Aller plus loin" data-min="70" data-title="Performance : BULK COLLECT et FORALL" data-desc="Changements de contexte, traitement par lots avec LIMIT, SAVE EXCEPTIONS, fonctions pipelined." hidden>
+  <p class="eyebrow">Chapitre 09 · 70 min</p>
+  <h1>Performance : BULK COLLECT et FORALL</h1>
+  <p class="lead">Le sujet qui distingue un développeur PL/SQL confirmé. Dès que tu traites des milliers de lignes, la question n'est plus « est-ce que ça marche » mais « combien d'allers-retours entre les moteurs ».</p>
+  <ul class="goals">
+    <li>expliquer le coût d'un changement de contexte avec un exemple chiffré ;</li>
+    <li>charger des lignes par lots avec <code>BULK COLLECT … LIMIT</code> ;</li>
+    <li>écrire en masse avec <code>FORALL</code> et gérer les erreurs ligne par ligne avec <code>SAVE EXCEPTIONS</code> ;</li>
+    <li>savoir quand le SQL pur bat tout le reste.</li>
+  </ul>
+
+  <h2>Le problème : ligne par ligne, lent par lent</h2>
+  <p class="prose">Une boucle qui exécute un <code>INSERT</code> à chaque tour fait deux changements de contexte par ligne (PL/SQL vers SQL, puis retour). <code>FORALL</code> envoie toutes les lignes au moteur SQL en un seul aller-retour. Lance la course :</p>
+  <div class="diagram" data-race></div>
+  <p class="prose">Sur 100 000 lignes, l'écart typique est d'un facteur 10 à 50. Tom Kyte, l'une des références d'Oracle, résume l'ordre de préférence ainsi :</p>
+  <ol class="prose">
+    <li>Fais-le en <strong>un seul ordre SQL</strong> si c'est possible (<code>INSERT … SELECT</code>, <code>MERGE</code>, <code>UPDATE</code> avec sous-requête).</li>
+    <li>Sinon, fais-le en <strong>PL/SQL par lots</strong> (<code>BULK COLLECT</code> + <code>FORALL</code>).</li>
+    <li>Ligne par ligne seulement quand il n'y a pas d'autre choix.</li>
+  </ol>
+
+  <h2>BULK COLLECT : lire en masse</h2>
+  <script type="text/plsql" data-title="Charger tout un résultat d'un coup">
+    DECLARE
+      TYPE t_emps IS TABLE OF employes%ROWTYPE;          -- pas besoin d'initialiser : BULK COLLECT le fait
+      l_emps t_emps;
+    BEGIN
+      SELECT * BULK COLLECT INTO l_emps FROM employes WHERE dept_id = 30;
+      DBMS_OUTPUT.PUT_LINE(l_emps.COUNT || ' lignes chargées');
+      FOR i IN 1 .. l_emps.COUNT LOOP                     -- dense, indicé à partir de 1
+        DBMS_OUTPUT.PUT_LINE(l_emps(i).nom);
+      END LOOP;
+    END;
+    /
+  </script>
+  <div class="callout pitfall"><span class="ct">Piège</span><p><code>BULK COLLECT</code> ne lève <strong>jamais</strong> <code>NO_DATA_FOUND</code> : sans ligne, la collection est simplement vide (<code>COUNT = 0</code>). Et sans <code>LIMIT</code>, une table de 50 millions de lignes est chargée entièrement en mémoire de session (PGA).</p></div>
+
+  <h3>Le schéma standard avec LIMIT</h3>
+  <script type="text/plsql" data-title="Traitement par lots de 1 000 lignes">
+    DECLARE
+      CURSOR c IS SELECT emp_id, salaire FROM employes;
+      TYPE t_ids  IS TABLE OF employes.emp_id%TYPE;
+      TYPE t_sals IS TABLE OF employes.salaire%TYPE;
+      l_ids  t_ids;
+      l_sals t_sals;
+    BEGIN
+      OPEN c;
+      LOOP
+        FETCH c BULK COLLECT INTO l_ids, l_sals LIMIT 1000;
+        EXIT WHEN l_ids.COUNT = 0;                    -- et PAS c%NOTFOUND ici
+
+        FOR i IN 1 .. l_ids.COUNT LOOP                -- calcul en mémoire, sans SQL
+          l_sals(i) := ROUND(l_sals(i) * 1.02, 2);
+        END LOOP;
+
+        FORALL i IN 1 .. l_ids.COUNT                  -- un seul aller-retour pour tout le lot
+          UPDATE employes SET salaire = l_sals(i) WHERE emp_id = l_ids(i);
+      END LOOP;
+      CLOSE c;
+    END;
+    /
+  </script>
+  <div class="callout pitfall"><span class="ct">Piège d'entretien : EXIT WHEN c%NOTFOUND</span><p>Si le dernier lot contient moins de lignes que <code>LIMIT</code> (par exemple 350 sur 1 000), <code>c%NOTFOUND</code> est déjà <code>TRUE</code> après ce <code>FETCH</code>. Avec <code>EXIT WHEN c%NOTFOUND</code> juste après le <code>FETCH</code>, ces 350 lignes ne sont jamais traitées. Soit on teste <code>COUNT = 0</code> juste après le <code>FETCH</code>, soit on met <code>EXIT WHEN c%NOTFOUND</code> à la <strong>fin</strong> de la boucle.</p></div>
+
+  <h2>FORALL : écrire en masse</h2>
+  <p class="prose"><code>FORALL</code> n'est pas une boucle : c'est <strong>un seul ordre DML</strong> exécuté avec un tableau de valeurs liées. Il ne peut contenir qu'un seul ordre <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> ou <code>MERGE</code>.</p>
+  <script type="text/plsql" data-title="FORALL et SQL%BULK_ROWCOUNT">
+    DECLARE
+      TYPE t_depts IS TABLE OF NUMBER;
+      l_depts t_depts := t_depts(20, 30, 40);
+    BEGIN
+      FORALL i IN 1 .. l_depts.COUNT
+        UPDATE employes SET salaire = salaire + 50 WHERE dept_id = l_depts(i);
+
+      DBMS_OUTPUT.PUT_LINE('Total : ' || SQL%ROWCOUNT);
+      FOR i IN 1 .. l_depts.COUNT LOOP
+        DBMS_OUTPUT.PUT_LINE('Dept ' || l_depts(i) || ' : ' || SQL%BULK_ROWCOUNT(i) || ' ligne(s)');
+      END LOOP;
+      ROLLBACK;
+    END;
+    /
+  </script>
+  <div class="output">Total : 9
+Dept 20 : 5 ligne(s)
+Dept 30 : 4 ligne(s)
+Dept 40 : 0 ligne(s)</div>
+  <p class="prose">Pour une collection creuse, <code>FORALL i IN 1 .. n</code> échoue. On utilise <code>FORALL i IN INDICES OF l_coll</code> (parcourt les indices existants) ou <code>VALUES OF l_index</code> (parcourt les indices listés dans une autre collection).</p>
+
+  <h3>SAVE EXCEPTIONS : ne pas tout perdre pour une ligne</h3>
+  <p class="prose">Par défaut, la première erreur arrête le <code>FORALL</code> (les lignes déjà traitées restent faites, pas les suivantes). Avec <code>SAVE EXCEPTIONS</code>, Oracle traite toutes les lignes, mémorise les échecs, puis lève <code>ORA-24381</code> à la fin. On lit le détail dans <code>SQL%BULK_EXCEPTIONS</code>.</p>
+  <script type="text/plsql" data-title="FORALL … SAVE EXCEPTIONS">
+    DECLARE
+      TYPE t_ids IS TABLE OF employes.emp_id%TYPE;
+      l_ids t_ids;
+      e_erreurs_bulk EXCEPTION;
+      PRAGMA EXCEPTION_INIT(e_erreurs_bulk, -24381);
+    BEGIN
+      SELECT emp_id BULK COLLECT INTO l_ids FROM employes WHERE dept_id = 20;
+
+      FORALL i IN 1 .. l_ids.COUNT SAVE EXCEPTIONS
+        UPDATE employes SET salaire = salaire - 4000 WHERE emp_id = l_ids(i);
+    EXCEPTION
+      WHEN e_erreurs_bulk THEN
+        DBMS_OUTPUT.PUT_LINE(SQL%ROWCOUNT || ' lignes mises à jour, '
+                             || SQL%BULK_EXCEPTIONS.COUNT || ' en erreur');
+        FOR j IN 1 .. SQL%BULK_EXCEPTIONS.COUNT LOOP
+          DBMS_OUTPUT.PUT_LINE('  emp ' || l_ids(SQL%BULK_EXCEPTIONS(j).ERROR_INDEX)
+            || ' : ' || SQLERRM(-SQL%BULK_EXCEPTIONS(j).ERROR_CODE));   -- ERROR_CODE est positif
+        END LOOP;
+        ROLLBACK;
+    END;
+    /
+  </script>
+  <div class="output">3 lignes mises à jour, 2 en erreur
+  emp 103 : ORA-02290: check constraint (.) violated
+  emp 109 : ORA-02290: check constraint (.) violated</div>
+
+  <h2>Fonctions pipelined</h2>
+  <p class="prose">Une fonction « table » renvoie une collection qu'on interroge avec <code>TABLE()</code>. En mode <code>PIPELINED</code>, elle envoie chaque ligne dès qu'elle est prête (<code>PIPE ROW</code>) au lieu de construire toute la collection en mémoire : idéal pour des transformations de données en flux (ETL).</p>
+  <script type="text/plsql" data-title="Fonction pipelined">
+    CREATE OR REPLACE TYPE t_ligne_paie AS OBJECT (emp_id NUMBER, mois DATE, montant NUMBER);
+    /
+    CREATE OR REPLACE TYPE t_paies AS TABLE OF t_ligne_paie;
+    /
+    CREATE OR REPLACE FUNCTION echeancier (p_annee IN PLS_INTEGER) RETURN t_paies PIPELINED IS
+    BEGIN
+      FOR r IN (SELECT emp_id, salaire FROM employes) LOOP
+        FOR m IN 1 .. 12 LOOP
+          PIPE ROW (t_ligne_paie(r.emp_id, TO_DATE(p_annee || '-' || m || '-01', 'YYYY-MM-DD'), r.salaire));
+        END LOOP;
+      END LOOP;
+      RETURN;                                   -- RETURN sans valeur
+    END;
+    /
+    SELECT emp_id, SUM(montant) FROM TABLE(echeancier(2026)) GROUP BY emp_id;
+  </script>
+
+  <h2>Exercices</h2>
+  <div class="ex" data-ex="ch09-e1">
+    <div class="ex-head"><h4>Exercice 1 · Archivage en masse</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Crée une table <code>employes_archive</code> de même structure (<code>CREATE TABLE employes_archive AS SELECT * FROM employes WHERE 1 = 0</code>). Copie-y les employés embauchés avant 2020 avec <code>BULK COLLECT … LIMIT 2</code> (petit lot pour voir plusieurs tours) et <code>FORALL</code>. Affiche le nombre de lignes par lot. Donne ensuite la solution en SQL pur.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution PL/SQL">
+          DECLARE
+            CURSOR c IS SELECT * FROM employes WHERE date_embauche < DATE '2020-01-01';
+            TYPE t_emps IS TABLE OF employes%ROWTYPE;
+            l_emps t_emps;
+            l_lot  PLS_INTEGER := 0;
+          BEGIN
+            OPEN c;
+            LOOP
+              FETCH c BULK COLLECT INTO l_emps LIMIT 2;
+              EXIT WHEN l_emps.COUNT = 0;
+              l_lot := l_lot + 1;
+              FORALL i IN 1 .. l_emps.COUNT
+                INSERT INTO employes_archive VALUES l_emps(i);
+              DBMS_OUTPUT.PUT_LINE('Lot ' || l_lot || ' : ' || SQL%ROWCOUNT || ' ligne(s)');
+            END LOOP;
+            CLOSE c;
+            COMMIT;
+          END;
+          /
+        </script>
+        <script type="text/plsql" data-title="Solution SQL pur (la meilleure)">
+          INSERT INTO employes_archive
+          SELECT * FROM employes WHERE date_embauche < DATE '2020-01-01';
+        </script>
+        <p class="hint">5 employés concernés : 3 lots (2, 2, 1). En entretien, mentionne toujours la solution SQL pur en premier.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch09-e2">
+    <div class="ex-head"><h4>Exercice 2 · Convertir du ligne-par-ligne</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Réécris ce code avec <code>BULK COLLECT</code> et <code>FORALL</code>, puis en un seul <code>UPDATE</code>.</p>
+      <script type="text/plsql" data-title="Code lent">
+        BEGIN
+          FOR r IN (SELECT emp_id, salaire, commission FROM employes WHERE poste = 'COMMERCIAL') LOOP
+            UPDATE employes
+               SET commission = NVL(r.commission, 0) + ROUND(r.salaire * 0.1)
+             WHERE emp_id = r.emp_id;
+          END LOOP;
+        END;
+        /
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Version par lots">
+          DECLARE
+            TYPE t_ids  IS TABLE OF employes.emp_id%TYPE;
+            TYPE t_coms IS TABLE OF employes.commission%TYPE;
+            l_ids  t_ids;
+            l_coms t_coms;
+          BEGIN
+            SELECT emp_id, NVL(commission, 0) + ROUND(salaire * 0.1)
+              BULK COLLECT INTO l_ids, l_coms
+              FROM employes WHERE poste = 'COMMERCIAL';
+
+            FORALL i IN 1 .. l_ids.COUNT
+              UPDATE employes SET commission = l_coms(i) WHERE emp_id = l_ids(i);
+          END;
+          /
+        </script>
+        <script type="text/plsql" data-title="Version SQL pur">
+          UPDATE employes
+             SET commission = NVL(commission, 0) + ROUND(salaire * 0.1)
+           WHERE poste = 'COMMERCIAL';
+        </script>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch09-e3">
+    <div class="ex-head"><h4>Exercice 3 · Import tolérant aux erreurs</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Prépare une collection de 5 employés à insérer, dont un avec un identifiant déjà existant (102) et un avec un salaire négatif. Insère-les avec <code>FORALL … SAVE EXCEPTIONS</code>, enregistre chaque échec dans <code>journal_erreurs</code> (programme = <code>'import'</code>, message = id + texte de l'erreur), valide les lignes correctes.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            TYPE t_emps IS TABLE OF employes%ROWTYPE INDEX BY PLS_INTEGER;
+            l_emps t_emps;
+            e_bulk EXCEPTION;
+            PRAGMA EXCEPTION_INIT(e_bulk, -24381);
+
+            PROCEDURE ajouter (p_id NUMBER, p_nom VARCHAR2, p_sal NUMBER) IS
+              r employes%ROWTYPE;
+            BEGIN
+              r.emp_id := p_id; r.nom := p_nom; r.salaire := p_sal; r.dept_id := 20;
+              r.date_embauche := SYSDATE;
+              l_emps(l_emps.COUNT + 1) := r;
+            END;
+          BEGIN
+            ajouter(301, 'Fabre', 3000);
+            ajouter(102, 'Doublon', 3000);     -- ORA-00001
+            ajouter(302, 'Gauthier', -10);     -- ORA-02290
+            ajouter(303, 'Henry', 2800);
+            ajouter(304, 'Ibert', 3300);
+
+            BEGIN
+              FORALL i IN 1 .. l_emps.COUNT SAVE EXCEPTIONS
+                INSERT INTO employes VALUES l_emps(i);
+            EXCEPTION
+              WHEN e_bulk THEN
+                FOR j IN 1 .. SQL%BULK_EXCEPTIONS.COUNT LOOP
+                  INSERT INTO journal_erreurs (programme, code, message)
+                  VALUES ('import',
+                          -SQL%BULK_EXCEPTIONS(j).ERROR_CODE,
+                          'id ' || l_emps(SQL%BULK_EXCEPTIONS(j).ERROR_INDEX).emp_id || ' : '
+                          || SQLERRM(-SQL%BULK_EXCEPTIONS(j).ERROR_CODE));
+                END LOOP;
+            END;
+            COMMIT;   -- valide les 3 lignes correctes et le journal
+          END;
+          /
+        </script>
+        <p class="hint"><code>SQL%BULK_EXCEPTIONS</code> reste disponible jusqu'au prochain <code>FORALL</code> : les <code>INSERT</code> dans le journal ne l'effacent pas. Résultat : 3 employés insérés, 2 lignes dans <code>journal_erreurs</code>.</p>
+      </details>
+    </div>
+  </div>
+
+  <h2>Quiz</h2>
+  <div data-quiz="ch09"></div>
+
+  <h2>Questions d'entretien</h2>
+  <details class="qa"><summary>Qu'est-ce qu'un changement de contexte et comment le réduire ?</summary><div><p>Le passage du moteur PL/SQL au moteur SQL (et retour) à chaque ordre SQL exécuté depuis PL/SQL, ou à chaque appel de fonction PL/SQL depuis SQL. On le réduit en écrivant un seul ordre SQL ensembliste, en utilisant <code>BULK COLLECT</code> et <code>FORALL</code>, et en évitant les fonctions PL/SQL appelées ligne à ligne dans les requêtes.</p></div></details>
+  <details class="qa"><summary>Pourquoi utiliser LIMIT avec BULK COLLECT ?</summary><div><p>Pour borner la mémoire de session : sans <code>LIMIT</code>, tout le résultat est chargé dans la PGA. Une valeur de 100 à 1 000 donne l'essentiel du gain de performance sans risque mémoire.</p></div></details>
+  <details class="qa"><summary>FORALL est-il une boucle ?</summary><div><p>Non. C'est une instruction qui envoie un seul ordre DML au moteur SQL avec un tableau de valeurs liées. Il ne peut contenir qu'un seul DML, pas de logique procédurale.</p></div></details>
+  <details class="qa"><summary>Que se passe-t-il quand une ligne échoue dans un FORALL sans SAVE EXCEPTIONS ?</summary><div><p>Le <code>FORALL</code> s'arrête à cette ligne et lève l'exception. Les lignes traitées avant restent modifiées (rollback au niveau de l'instruction seulement pour la ligne fautive) tant que l'appelant ne fait pas de <code>ROLLBACK</code>. Les lignes suivantes ne sont pas traitées.</p></div></details>
+</section>

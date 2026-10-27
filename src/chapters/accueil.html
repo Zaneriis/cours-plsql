@@ -1,0 +1,49 @@
+<!-- ===================================================== ACCUEIL ===================================================== -->
+<section class="chapter" id="accueil" data-title="Accueil" data-course="no">
+  <div class="hero">
+    <p class="eyebrow">Parcours de révision · 14 chapitres · environ 12 h</p>
+    <h1>Remettre <span>PL/SQL</span> en mémoire, puis aller plus loin.</h1>
+    <p class="lead">Un parcours pensé pour un niveau débutant confirmé qui prépare un entretien : chaque chapitre rappelle les bases, montre des exemples exécutables, puis te fait pratiquer avec des exercices corrigés, un quiz et les questions qu'un recruteur pose vraiment.</p>
+  </div>
+
+  <div class="resume">
+    <div class="stats">
+      <div><div class="big" data-p="pct">0 %</div><div class="lbl">du parcours terminé</div></div>
+      <div><div class="big" data-p="ex">0 / 0</div><div class="lbl">exercices faits</div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start">
+      <a class="btn primary" id="resume-btn" href="#ch00">Commencer</a>
+      <span class="hint" id="resume-txt"></span>
+    </div>
+  </div>
+
+  <h2 style="border:0;margin-top:20px">Les chapitres</h2>
+  <p class="prose">Le rond à côté de chaque chapitre dans le sommaire montre où tu en es : vide (pas commencé), orange (en cours), vert (terminé). Un chapitre passe en « terminé » quand tu cliques sur le bouton en bas de sa page.</p>
+  <div class="cards" id="home-cards"></div>
+
+  <h2>Plan d'apprentissage conseillé</h2>
+  <p class="prose">Compte une heure à une heure et demie par jour. Si l'entretien est très proche, suis le parcours express en fin de liste.</p>
+  <ol class="plan">
+    <li><b>Jour 1</b><span>Chapitres 00 à 02 : installer un environnement, recréer le schéma d'exemple, revoir la structure d'un bloc, les types et le piège du <code>NULL</code>.</span></li>
+    <li><b>Jour 2</b><span>Chapitre 03 (structures de contrôle) et début du chapitre 04 : <code>SELECT INTO</code> et curseurs implicites.</span></li>
+    <li><b>Jour 3</b><span>Fin du chapitre 04 (curseurs explicites, <code>REF CURSOR</code>) et chapitre 05 (exceptions). Ces deux chapitres tombent dans presque tous les entretiens.</span></li>
+    <li><b>Jour 4</b><span>Chapitres 06 et 07 : procédures, fonctions, packages. Fais l'exercice « package RH » en entier.</span></li>
+    <li><b>Jour 5</b><span>Chapitres 08 et 09 : collections, <code>BULK COLLECT</code>, <code>FORALL</code>. C'est ce qui distingue un profil « confirmé ».</span></li>
+    <li><b>Jour 6</b><span>Chapitres 10 et 11 : triggers, table mutante, transactions autonomes, SQL dynamique et injection.</span></li>
+    <li><b>Jour 7</b><span>Chapitre 12 (bonnes pratiques et optimisation) puis chapitre 13 : flashcards, rappels SQL, cas pratique chronométré.</span></li>
+    <li><b>Veille</b><span>Uniquement le chapitre 13 : refais les flashcards marquées « à revoir » et relis la liste des pièges.</span></li>
+    <li><b>Express</b><span>Moins de 3 jours ? Fais 04, 05, 06, 07, 09, 10 puis 13. Lis seulement les encadrés « Piège » et « En entretien » des autres chapitres.</span></li>
+  </ol>
+
+  <h2>Comment utiliser ce site</h2>
+  <ul class="prose">
+    <li><strong>Exécute le code.</strong> Chaque bloc a un bouton « Copier ». Lis le chapitre 00 pour avoir une base Oracle gratuite en quelques minutes.</li>
+    <li><strong>Cherche avant d'ouvrir la solution.</strong> Coche « Marquer comme fait » seulement quand ta solution fonctionne.</li>
+    <li><strong>Les animations pas à pas</strong> se pilotent avec « Suiv. » ou « Lecture » : la ligne surlignée est celle qu'Oracle exécute, l'état des variables et la sortie s'affichent à droite.</li>
+    <li><strong>Ta progression</strong> est enregistrée automatiquement dans ce navigateur. Utilise « Sauvegarder » / « Importer » dans le sommaire pour la passer d'un appareil à l'autre.</li>
+  </ul>
+  <div class="callout tip"><span class="ct">Légende des encadrés</span>
+    <p><strong>Astuce</strong> : bonne pratique ou raccourci utile. <strong>Piège</strong> : erreur classique, souvent posée en entretien. <strong>En entretien</strong> : ce que le recruteur attend comme réponse.</p>
+  </div>
+  <p style="margin-top:28px"><button type="button" class="btn small danger" data-reset>Effacer ma progression</button></p>
+</section>

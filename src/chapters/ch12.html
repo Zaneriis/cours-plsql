@@ -1,0 +1,229 @@
+<!-- ===================================================== CH 12 ===================================================== -->
+<section class="chapter" id="ch12" data-num="12" data-group="Aller plus loin" data-min="50" data-title="Bonnes pratiques et optimisation" data-desc="Instrumentation, avertissements du compilateur, plans d'exécution, profilage, conventions et nouveautés 12c à 23ai." hidden>
+  <p class="eyebrow">Chapitre 12 · 50 min</p>
+  <h1>Bonnes pratiques et optimisation</h1>
+  <p class="lead">La partie qui fait passer de « je sais écrire du PL/SQL » à « je sais livrer du PL/SQL en production ». En entretien, ces sujets sortent souvent sous la forme « raconte-moi comment tu as diagnostiqué un traitement lent ».</p>
+  <ul class="goals">
+    <li>instrumenter un traitement pour le suivre en production ;</li>
+    <li>appliquer une démarche de diagnostic de performance ;</li>
+    <li>citer des conventions de code et les nouveautés récentes d'Oracle.</li>
+  </ul>
+
+  <h2>Instrumenter son code</h2>
+  <p class="prose"><code>DBMS_OUTPUT</code> ne sert qu'en développement : rien ne s'affiche avant la fin du bloc et personne ne le lit en production. Les vrais outils :</p>
+  <script type="text/plsql" data-title="DBMS_APPLICATION_INFO : voir l'avancement dans V$SESSION">
+    DECLARE
+      l_total PLS_INTEGER;
+      l_i     PLS_INTEGER := 0;
+    BEGIN
+      DBMS_APPLICATION_INFO.SET_MODULE(module_name => 'BATCH_PAIE', action_name => 'calcul');
+      SELECT COUNT(*) INTO l_total FROM employes;
+      FOR r IN (SELECT emp_id FROM employes) LOOP
+        l_i := l_i + 1;
+        DBMS_APPLICATION_INFO.SET_CLIENT_INFO('emp ' || r.emp_id || ' (' || l_i || '/' || l_total || ')');
+        -- ... traitement
+      END LOOP;
+      DBMS_APPLICATION_INFO.SET_MODULE(NULL, NULL);
+    END;
+    /
+    -- Depuis une autre session :
+    SELECT sid, module, action, client_info FROM v$session WHERE module = 'BATCH_PAIE';
+  </script>
+  <ul class="prose">
+    <li><strong>Table de log</strong> alimentée par une procédure autonome (niveau, message, horodatage, <code>FORMAT_ERROR_BACKTRACE</code>). Le framework open source <em>Logger</em> en est un exemple répandu.</li>
+    <li><strong><code>DBMS_SESSION.SET_IDENTIFIER</code></strong> pour retrouver l'utilisateur métier derrière un pool de connexions.</li>
+    <li><strong><code>UTL_CALL_STACK</code></strong> (12c) pour connaître le sous-programme appelant, par exemple pour enrichir les logs.</li>
+  </ul>
+
+  <h2>Laisser le compilateur t'aider</h2>
+  <script type="text/plsql" data-title="Avertissements et niveau d'optimisation">
+    ALTER SESSION SET PLSQL_WARNINGS = 'ENABLE:ALL';
+    ALTER SESSION SET PLSQL_OPTIMIZE_LEVEL = 2;          -- défaut ; 3 ajoute l'inlining automatique
+
+    CREATE OR REPLACE PROCEDURE p_test IS
+    BEGIN
+      NULL;
+    EXCEPTION
+      WHEN OTHERS THEN NULL;                              -- PLW-06009 : gestionnaire OTHERS sans RAISE
+    END;
+    /
+    SHOW ERRORS
+  </script>
+  <p class="prose">D'autres avertissements utiles : <code>PLW-06002</code> (code inaccessible), <code>PLW-07204</code> (conversion qui empêche un index). La compilation native (<code>PLSQL_CODE_TYPE = NATIVE</code>) accélère le code très calculatoire, pas le code qui fait surtout du SQL.</p>
+
+  <h2>Diagnostiquer un traitement lent</h2>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TD
+  A["Traitement lent"] --> B{"Où passe le temps ?<br/>DBMS_HPROF, AWR/ASH,<br/>logs horodatés"}
+  B -- "dans une requête SQL" --> C["Plan d'exécution :<br/>DBMS_XPLAN.DISPLAY_CURSOR<br/>index ? statistiques ? cardinalités ?"]
+  B -- "dans le code PL/SQL" --> D{"Boucle ligne par ligne<br/>avec SQL dedans ?"}
+  D -- oui --> E["SQL ensembliste<br/>ou BULK COLLECT + FORALL"]
+  D -- non --> F["Fonction appelée en SQL ?<br/>RESULT_CACHE, DETERMINISTIC,<br/>ou réécriture en SQL"]
+  B -- "en attente (verrous)" --> G["V$SESSION.BLOCKING_SESSION<br/>transactions trop longues ?"]
+    </pre>
+  </div>
+  <script type="text/plsql" data-title="Lire le plan réel d'une requête">
+    SELECT /*+ GATHER_PLAN_STATISTICS */ e.nom, d.nom
+      FROM employes e JOIN departements d ON d.dept_id = e.dept_id
+     WHERE e.salaire > 4000;
+
+    SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(format => 'ALLSTATS LAST'));
+  </script>
+  <p class="prose">Compare les colonnes <code>E-Rows</code> (estimé) et <code>A-Rows</code> (réel) : un gros écart signale des statistiques absentes ou fausses (<code>DBMS_STATS.GATHER_TABLE_STATS</code>). Pour le PL/SQL, le profileur hiérarchique <code>DBMS_HPROF</code> donne le temps passé par sous-programme.</p>
+  <div class="callout tip"><span class="ct">Check-list performance à citer</span>
+    <ul>
+      <li>Une requête ensembliste plutôt qu'une boucle.</li>
+      <li><code>BULK COLLECT … LIMIT</code> et <code>FORALL</code> quand la boucle est nécessaire.</li>
+      <li>Variables liées en SQL dynamique.</li>
+      <li>Pas de fonction sur une colonne indexée dans le <code>WHERE</code> (sinon index sur fonction).</li>
+      <li>Pas de conversion implicite sur une colonne indexée.</li>
+      <li><code>COMMIT</code> à la fin de l'unité de travail, pas à chaque ligne (chaque commit force une écriture du journal redo).</li>
+      <li><code>PLS_INTEGER</code> pour les compteurs, cache de résultats pour les lectures répétées.</li>
+    </ul>
+  </div>
+
+  <h2>Conventions de code</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Préfixe</th><th>Pour</th><th>Exemple</th></tr></thead>
+    <tbody>
+      <tr><td><code>l_</code></td><td>Variable locale</td><td><code>l_total</code></td></tr>
+      <tr><td><code>g_</code></td><td>Variable globale de package</td><td><code>g_nb_appels</code></td></tr>
+      <tr><td><code>p_</code></td><td>Paramètre</td><td><code>p_emp_id</code></td></tr>
+      <tr><td><code>c_</code></td><td>Constante</td><td><code>c_taux_tva</code></td></tr>
+      <tr><td><code>e_</code></td><td>Exception</td><td><code>e_solde_insuffisant</code></td></tr>
+      <tr><td><code>t_</code> / <code>r_</code></td><td>Type / record</td><td><code>t_emps</code>, <code>r_emp</code></td></tr>
+      <tr><td><code>c_</code> ou <code>cur_</code></td><td>Curseur</td><td><code>cur_commerciaux</code></td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout pitfall"><span class="ct">Pourquoi préfixer ?</span><p>Sans préfixe, une variable qui porte le nom d'une colonne est <strong>masquée par la colonne</strong> dans un ordre SQL. <code>DELETE FROM employes WHERE nom = nom;</code> avec une variable <code>nom</code> compare la colonne à elle-même… et supprime toute la table (sauf les noms NULL).</p></div>
+  <ul class="prose">
+    <li>Un sous-programme fait une chose, tient sur un écran, et a un nom en verbe (<code>calculer_prime</code>).</li>
+    <li>Pas de valeurs en dur : constantes de package ou table de paramètres.</li>
+    <li>Tests unitaires avec <strong>utPLSQL</strong>, code versionné dans Git, déploiement scripté (Liquibase, Flyway, SQLcl <code>project</code>).</li>
+  </ul>
+
+  <h2>Nouveautés par version (à citer en entretien)</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Version</th><th>Nouveautés PL/SQL et SQL utiles</th></tr></thead>
+    <tbody>
+      <tr><td>11g</td><td>Trigger composé, <code>CONTINUE</code>, <code>SIMPLE_INTEGER</code>, <code>RESULT_CACHE</code>, séquence dans une expression PL/SQL, <code>FOLLOWS</code>.</td></tr>
+      <tr><td>12c</td><td><code>WITH FUNCTION</code> dans une requête, <code>PRAGMA UDF</code>, <code>ACCESSIBLE BY</code>, colonnes <code>IDENTITY</code>, <code>FETCH FIRST n ROWS</code>, <code>UTL_CALL_STACK</code>, types PL/SQL utilisables avec <code>TABLE()</code>.</td></tr>
+      <tr><td>18c / 19c</td><td>Expressions qualifiées (constructeurs de records et tableaux associatifs), fonctions table polymorphes, <code>LISTAGG DISTINCT</code>.</td></tr>
+      <tr><td>21c</td><td>Itérateurs de boucle enrichis (<code>FOR i IN 1..10 BY 2</code>, <code>FOR i IN VALUES OF</code>, plusieurs plages), macros SQL.</td></tr>
+      <tr><td>23ai</td><td>Type <code>BOOLEAN</code> en SQL, <code>IF [NOT] EXISTS</code> dans le DDL, <code>SELECT</code> sans <code>FROM dual</code>, domaines SQL, annotations, <code>UPDATE … FROM</code> (jointure dans un UPDATE), JSON Relational Duality.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Exercices</h2>
+  <div class="ex" data-ex="ch12-e1">
+    <div class="ex-head"><h4>Exercice 1 · Revue de code</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Liste tous les problèmes de ce code (au moins 7) et propose une version corrigée.</p>
+      <script type="text/plsql" data-title="Code à relire">
+        CREATE OR REPLACE PROCEDURE maj (dept NUMBER) IS
+          salaire NUMBER;
+          cursor c is select * from employes;
+        BEGIN
+          FOR r IN c LOOP
+            IF r.dept_id = dept THEN
+              SELECT salaire INTO salaire FROM employes WHERE emp_id = r.emp_id;
+              UPDATE employes SET salaire = salaire * 1.1 WHERE emp_id = r.emp_id;
+              COMMIT;
+            END IF;
+          END LOOP;
+        EXCEPTION
+          WHEN OTHERS THEN NULL;
+        END;
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <ol>
+          <li>Nom de procédure et de paramètre non explicites, pas de préfixe <code>p_</code>.</li>
+          <li>Variable <code>salaire</code> du même nom que la colonne : ambiguïté, dans l'<code>UPDATE</code> c'est la colonne qui est utilisée.</li>
+          <li>Le curseur lit toute la table puis filtre en PL/SQL au lieu de filtrer dans le <code>WHERE</code>.</li>
+          <li>Le <code>SELECT INTO</code> relit une ligne déjà lue par le curseur : inutile.</li>
+          <li>Un <code>UPDATE</code> par ligne au lieu d'un seul ordre ensembliste.</li>
+          <li><code>COMMIT</code> dans la boucle : lent, et le traitement ne peut plus être annulé en cas d'erreur.</li>
+          <li><code>WHEN OTHERS THEN NULL</code> : erreurs avalées silencieusement.</li>
+          <li>Pas de type ancré (<code>%TYPE</code>), pas de compte rendu du nombre de lignes, pas de taux en paramètre.</li>
+        </ol>
+        <script type="text/plsql" data-title="Version corrigée">
+          CREATE OR REPLACE PROCEDURE augmenter_departement (
+            p_dept_id IN  employes.dept_id%TYPE,
+            p_pct     IN  NUMBER DEFAULT 10,
+            p_nb      OUT PLS_INTEGER
+          ) IS
+          BEGIN
+            UPDATE employes
+               SET salaire = ROUND(salaire * (1 + p_pct / 100), 2)
+             WHERE dept_id = p_dept_id;
+            p_nb := SQL%ROWCOUNT;
+            -- pas de COMMIT : l'appelant décide ; pas de WHEN OTHERS : l'erreur remonte
+          END augmenter_departement;
+          /
+        </script>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch12-e2">
+    <div class="ex-head"><h4>Exercice 2 · Instrumenter un batch</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Crée un package <code>pkg_log</code> avec <code>info(p_msg)</code> et <code>erreur(p_msg)</code> qui écrivent dans une table <code>journal</code> (à créer : id, horodatage, niveau, programme, message) en transaction autonome. Le nom du programme appelant doit être trouvé automatiquement avec <code>UTL_CALL_STACK</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          CREATE TABLE journal (
+            id        NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            horodatage TIMESTAMP DEFAULT SYSTIMESTAMP,
+            niveau    VARCHAR2(10),
+            programme VARCHAR2(200),
+            message   VARCHAR2(4000)
+          );
+
+          CREATE OR REPLACE PACKAGE pkg_log AS
+            PROCEDURE info   (p_msg IN VARCHAR2);
+            PROCEDURE erreur (p_msg IN VARCHAR2 DEFAULT NULL);
+          END pkg_log;
+          /
+          CREATE OR REPLACE PACKAGE BODY pkg_log AS
+            FUNCTION appelant RETURN VARCHAR2 IS
+            BEGIN
+              -- profondeur 1 = appelant, 2 = info/erreur, 3 = celui qui a appelé info/erreur
+              RETURN UTL_CALL_STACK.CONCATENATE_SUBPROGRAM(UTL_CALL_STACK.SUBPROGRAM(3));
+            EXCEPTION
+              WHEN OTHERS THEN RETURN 'inconnu';     -- appel depuis un bloc anonyme peu profond
+            END appelant;
+
+            PROCEDURE ecrire (p_niveau IN VARCHAR2, p_msg IN VARCHAR2, p_prog IN VARCHAR2) IS
+              PRAGMA AUTONOMOUS_TRANSACTION;
+            BEGIN
+              INSERT INTO journal (niveau, programme, message)
+              VALUES (p_niveau, p_prog, SUBSTR(p_msg, 1, 4000));
+              COMMIT;
+            END ecrire;
+
+            PROCEDURE info (p_msg IN VARCHAR2) IS
+            BEGIN
+              ecrire('INFO', p_msg, appelant);
+            END info;
+
+            PROCEDURE erreur (p_msg IN VARCHAR2 DEFAULT NULL) IS
+            BEGIN
+              ecrire('ERREUR',
+                     NVL(p_msg, SQLERRM) || CHR(10) || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE,
+                     appelant);
+            END erreur;
+          END pkg_log;
+          /
+        </script>
+        <p class="hint">Le calcul de l'appelant se fait dans <code>info</code> / <code>erreur</code> (profondeur 3 depuis <code>appelant</code>) avant d'entrer dans <code>ecrire</code>, pour que la profondeur soit stable.</p>
+      </details>
+    </div>
+  </div>
+
+  <h2>Quiz</h2>
+  <div data-quiz="ch12"></div>
+
+  <h2>Questions d'entretien</h2>
+  <details class="qa"><summary>Comment as-tu déjà optimisé un traitement PL/SQL ?</summary><div><p>Structure ta réponse : <strong>mesure</strong> (logs horodatés, <code>DBMS_HPROF</code>, AWR), <strong>cause</strong> (ex. boucle de 2 millions d'<code>UPDATE</code> unitaires avec <code>COMMIT</code> à chaque ligne), <strong>action</strong> (réécriture en <code>MERGE</code> ensembliste ou <code>BULK COLLECT</code> + <code>FORALL</code>, commit en fin de lot), <strong>résultat chiffré</strong> (« de 3 h à 6 min »). Un exemple concret vaut mieux qu'une liste théorique.</p></div></details>
+  <details class="qa"><summary>Comment tester du code PL/SQL ?</summary><div><p>Avec un framework de tests unitaires comme utPLSQL (annotations <code>--%suite</code>, <code>--%test</code>, assertions <code>ut.expect</code>), en isolant les données de test et en annulant les modifications après chaque test. Les tests tournent en intégration continue avec le déploiement des scripts.</p></div></details>
+</section>

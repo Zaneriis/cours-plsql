@@ -1,0 +1,258 @@
+<!-- ===================================================== CH 07 ===================================================== -->
+<section class="chapter" id="ch07" data-num="07" data-group="Programmation modulaire" data-min="60" data-title="Packages" data-desc="Spécification et corps, public et privé, état de session, initialisation, surcharge, ORA-04068." hidden>
+  <p class="eyebrow">Chapitre 07 · 60 min</p>
+  <h1>Packages</h1>
+  <p class="lead">En pratique, presque tout le code PL/SQL professionnel vit dans des packages. Un recruteur s'attend à ce que tu saches expliquer pourquoi, et à ce que tu en écrives un sans hésiter.</p>
+  <ul class="goals">
+    <li>séparer spécification (contrat public) et corps (implémentation) ;</li>
+    <li>utiliser variables de package, section d'initialisation et surcharge ;</li>
+    <li>expliquer les avantages en dépendances, performance et sécurité ;</li>
+    <li>comprendre l'erreur <code>ORA-04068</code> sur l'état de package.</li>
+  </ul>
+
+  <h2>Spécification et corps</h2>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+  A["Appelants<br/>autres packages, applis, SQL"] -->|"voient seulement"| S
+  subgraph PKG["Package pkg_rh"]
+    S["SPÉCIFICATION (public)<br/>embaucher, augmenter<br/>constante c_smic<br/>exception e_regle"]
+    B["CORPS (privé)<br/>code des sous-programmes publics<br/>valider_salaire (privée)<br/>g_nb_appels (variable privée)<br/>section d'initialisation"]
+    S -.->|"implémenté par"| B
+  end
+    </pre>
+    <p class="cap">Tout ce qui est déclaré dans la spécification est public. Tout ce qui n'est que dans le corps est privé.</p>
+  </div>
+  <script type="text/plsql" data-title="Spécification">
+    CREATE OR REPLACE PACKAGE pkg_rh AS
+      c_smic CONSTANT NUMBER := 1400;                       -- constante publique
+      e_regle_metier EXCEPTION;                             -- exception publique
+      PRAGMA EXCEPTION_INIT(e_regle_metier, -20100);
+
+      PROCEDURE embaucher (
+        p_nom     IN employes.nom%TYPE,
+        p_poste   IN employes.poste%TYPE,
+        p_salaire IN employes.salaire%TYPE,
+        p_dept_id IN employes.dept_id%TYPE,
+        p_emp_id  OUT employes.emp_id%TYPE
+      );
+
+      PROCEDURE augmenter (p_emp_id IN employes.emp_id%TYPE, p_pct IN NUMBER);
+      PROCEDURE augmenter (p_dept_id IN departements.dept_id%TYPE, p_pct IN NUMBER, p_tout_le_dept IN BOOLEAN);  -- surcharge
+
+      FUNCTION nb_appels RETURN PLS_INTEGER;
+    END pkg_rh;
+    /
+  </script>
+  <script type="text/plsql" data-title="Corps">
+    CREATE OR REPLACE PACKAGE BODY pkg_rh AS
+      g_nb_appels PLS_INTEGER := 0;                         -- variable privée, vit toute la session
+
+      PROCEDURE valider_salaire (p_salaire IN NUMBER) IS    -- procédure privée
+      BEGIN
+        IF p_salaire IS NULL OR p_salaire < c_smic THEN
+          RAISE_APPLICATION_ERROR(-20100, 'Salaire invalide : ' || NVL(TO_CHAR(p_salaire), 'NULL'));
+        END IF;
+      END valider_salaire;
+
+      PROCEDURE embaucher (
+        p_nom IN employes.nom%TYPE, p_poste IN employes.poste%TYPE,
+        p_salaire IN employes.salaire%TYPE, p_dept_id IN employes.dept_id%TYPE,
+        p_emp_id OUT employes.emp_id%TYPE
+      ) IS
+      BEGIN
+        g_nb_appels := g_nb_appels + 1;
+        valider_salaire(p_salaire);
+        INSERT INTO employes (emp_id, nom, poste, salaire, dept_id)
+        VALUES (seq_employes.NEXTVAL, p_nom, p_poste, p_salaire, p_dept_id)
+        RETURNING emp_id INTO p_emp_id;
+      END embaucher;
+
+      PROCEDURE augmenter (p_emp_id IN employes.emp_id%TYPE, p_pct IN NUMBER) IS
+      BEGIN
+        g_nb_appels := g_nb_appels + 1;
+        UPDATE employes SET salaire = salaire * (1 + p_pct / 100) WHERE emp_id = p_emp_id;
+      END augmenter;
+
+      PROCEDURE augmenter (p_dept_id IN departements.dept_id%TYPE, p_pct IN NUMBER, p_tout_le_dept IN BOOLEAN) IS
+      BEGIN
+        g_nb_appels := g_nb_appels + 1;
+        IF p_tout_le_dept THEN
+          UPDATE employes SET salaire = salaire * (1 + p_pct / 100) WHERE dept_id = p_dept_id;
+        END IF;
+      END augmenter;
+
+      FUNCTION nb_appels RETURN PLS_INTEGER IS
+      BEGIN
+        RETURN g_nb_appels;
+      END nb_appels;
+
+    BEGIN
+      -- section d'initialisation : exécutée UNE fois par session, au premier appel du package
+      DBMS_OUTPUT.PUT_LINE('pkg_rh initialisé');
+    END pkg_rh;
+    /
+  </script>
+  <script type="text/plsql" data-title="Utilisation">
+    DECLARE
+      l_id employes.emp_id%TYPE;
+    BEGIN
+      pkg_rh.embaucher('Blanc', 'DEV', 3500, 20, l_id);
+      pkg_rh.augmenter(l_id, 5);
+      DBMS_OUTPUT.PUT_LINE('Appels dans cette session : ' || pkg_rh.nb_appels);
+      DBMS_OUTPUT.PUT_LINE('SMIC : ' || pkg_rh.c_smic);
+      pkg_rh.embaucher('Noir', 'DEV', 900, 20, l_id);
+    EXCEPTION
+      WHEN pkg_rh.e_regle_metier THEN
+        DBMS_OUTPUT.PUT_LINE('Refusé : ' || SQLERRM);
+        ROLLBACK;
+    END;
+    /
+  </script>
+  <div class="output">pkg_rh initialisé
+Appels dans cette session : 2
+SMIC : 1400
+Refusé : ORA-20100: Salaire invalide : 900</div>
+
+  <h2>Pourquoi des packages ?</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Avantage</th><th>Explication</th></tr></thead>
+    <tbody>
+      <tr><td>Encapsulation</td><td>On expose une API stable et on cache les détails (procédures privées, variables).</td></tr>
+      <tr><td>Dépendances</td><td>Les appelants dépendent de la <strong>spécification</strong>. Recompiler le corps n'invalide pas les appelants, ce qui évite les cascades d'invalidation.</td></tr>
+      <tr><td>Performance</td><td>Le package entier est chargé en mémoire au premier appel ; les appels suivants n'ont pas à recharger chaque unité.</td></tr>
+      <tr><td>État de session</td><td>Les variables de package conservent leur valeur entre les appels, pendant toute la session.</td></tr>
+      <tr><td>Surcharge</td><td>Plusieurs sous-programmes de même nom avec des paramètres différents (en nombre, ordre ou famille de types).</td></tr>
+      <tr><td>Sécurité</td><td>Un seul <code>GRANT EXECUTE ON pkg_rh</code> donne accès à toute l'API, sans accès direct aux tables.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>L'état de package et ORA-04068</h2>
+  <p class="prose">Chaque session a <strong>sa propre copie</strong> des variables de package : deux utilisateurs ne partagent jamais <code>g_nb_appels</code>. Si un package possède des variables (il a un « état ») et qu'on recompile son corps pendant que des sessions l'utilisent, ces sessions reçoivent au prochain appel :</p>
+  <div class="output" style="margin:0 0 16px;border-top:1px solid var(--code-line);border-radius:var(--radius)">ORA-04068: existing state of packages has been discarded
+ORA-04061: existing state of package body "RH.PKG_RH" has been invalidated</div>
+  <p class="prose">Le second appel fonctionne, car l'état a été réinitialisé. Les remèdes : éviter les variables globales quand ce n'est pas nécessaire (un package sans état n'a pas ce problème), déplacer les constantes littérales… ou utiliser le <em>Edition-Based Redefinition</em> pour les déploiements sans interruption.</p>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Une variable de package n'est <strong>pas</strong> partagée entre sessions et n'est pas transactionnelle : un <code>ROLLBACK</code> ne remet pas <code>g_nb_appels</code> à sa valeur précédente. Avec un pool de connexions côté application, une variable de package peut « fuiter » d'un utilisateur web à l'autre qui réutilise la même session.</p></div>
+  <div class="callout tip"><span class="ct">Astuce</span><p>Les mots-clés <code>ACCESSIBLE BY (pkg_api)</code> (12c) limitent les unités autorisées à appeler un package : utile pour un package « interne » qui ne doit être appelé que par la couche API.</p></div>
+
+  <h2>Exercices</h2>
+  <div class="ex" data-ex="ch07-e1">
+    <div class="ex-head"><h4>Exercice 1 · Package utilitaire de dates</h4><span class="lvl l1">facile</span></div>
+    <div class="ex-body">
+      <p>Crée <code>pkg_dates</code> avec une constante publique <code>c_format</code> (<code>'DD/MM/YYYY'</code>), une fonction <code>jours_ouvres(p_debut DATE, p_fin DATE)</code> qui compte les jours du lundi au vendredi entre deux dates incluses, et une fonction privée <code>est_weekend(p_d DATE) RETURN BOOLEAN</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          CREATE OR REPLACE PACKAGE pkg_dates AS
+            c_format CONSTANT VARCHAR2(10) := 'DD/MM/YYYY';
+            FUNCTION jours_ouvres (p_debut IN DATE, p_fin IN DATE) RETURN PLS_INTEGER;
+          END pkg_dates;
+          /
+          CREATE OR REPLACE PACKAGE BODY pkg_dates AS
+            FUNCTION est_weekend (p_d IN DATE) RETURN BOOLEAN IS
+            BEGIN
+              -- 'IW' = semaine ISO qui commence le lundi : indépendant de NLS_TERRITORY
+              RETURN TRUNC(p_d) - TRUNC(p_d, 'IW') >= 5;
+            END est_weekend;
+
+            FUNCTION jours_ouvres (p_debut IN DATE, p_fin IN DATE) RETURN PLS_INTEGER IS
+              l_n PLS_INTEGER := 0;
+            BEGIN
+              FOR i IN 0 .. TRUNC(p_fin) - TRUNC(p_debut) LOOP
+                IF NOT est_weekend(TRUNC(p_debut) + i) THEN
+                  l_n := l_n + 1;
+                END IF;
+              END LOOP;
+              RETURN l_n;
+            END jours_ouvres;
+          END pkg_dates;
+          /
+          SELECT pkg_dates.jours_ouvres(DATE '2026-10-26', DATE '2026-11-08') FROM dual;  -- 10
+        </script>
+        <p class="hint"><code>TO_CHAR(d, 'D')</code> dépend du paramètre <code>NLS_TERRITORY</code> (le 1er jour de la semaine n'est pas le même en France et aux États-Unis) : piège classique. L'écart avec <code>TRUNC(d, 'IW')</code> est fiable partout. La fonction privée renvoie un <code>BOOLEAN</code> : possible car elle n'est appelée que depuis PL/SQL.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch07-e2">
+    <div class="ex-head"><h4>Exercice 2 · Compléter pkg_rh</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Ajoute à <code>pkg_rh</code> une procédure publique <code>licencier(p_emp_id)</code> qui refuse (erreur -20101) de supprimer un employé qui manage encore quelqu'un, et une fonction publique <code>masse_salariale(p_dept_id DEFAULT NULL)</code> qui renvoie la masse d'un département, ou de toute l'entreprise si le paramètre est NULL. Pense à modifier la spécification <strong>et</strong> le corps.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Ajouts dans la spécification">
+          PROCEDURE licencier (p_emp_id IN employes.emp_id%TYPE);
+          FUNCTION masse_salariale (p_dept_id IN departements.dept_id%TYPE DEFAULT NULL) RETURN NUMBER;
+        </script>
+        <script type="text/plsql" data-title="Ajouts dans le corps">
+          PROCEDURE licencier (p_emp_id IN employes.emp_id%TYPE) IS
+            l_nb PLS_INTEGER;
+          BEGIN
+            g_nb_appels := g_nb_appels + 1;
+            SELECT COUNT(*) INTO l_nb FROM employes WHERE manager_id = p_emp_id;
+            IF l_nb > 0 THEN
+              RAISE_APPLICATION_ERROR(-20101, 'Employé ' || p_emp_id || ' manage encore ' || l_nb || ' personne(s)');
+            END IF;
+            DELETE FROM historique_salaires WHERE emp_id = p_emp_id;
+            DELETE FROM employes WHERE emp_id = p_emp_id;
+            IF SQL%ROWCOUNT = 0 THEN
+              RAISE_APPLICATION_ERROR(-20102, 'Employé ' || p_emp_id || ' introuvable');
+            END IF;
+          END licencier;
+
+          FUNCTION masse_salariale (p_dept_id IN departements.dept_id%TYPE DEFAULT NULL) RETURN NUMBER IS
+            l_total NUMBER;
+          BEGIN
+            SELECT NVL(SUM(salaire), 0) INTO l_total
+              FROM employes
+             WHERE p_dept_id IS NULL OR dept_id = p_dept_id;
+            RETURN l_total;
+          END masse_salariale;
+        </script>
+        <p class="hint">La contrainte de clé étrangère <code>manager_id</code> bloquerait de toute façon la suppression (ORA-02292), mais le contrôle explicite donne un message métier compréhensible.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch07-e3">
+    <div class="ex-head"><h4>Exercice 3 · Cache de session</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Crée <code>pkg_cache_dept</code> avec une fonction <code>nom(p_dept_id)</code> qui lit le nom du département en base au premier appel, puis le garde en mémoire (tableau associatif privé) pour les appels suivants de la session. Ajoute une procédure <code>vider</code>. Quel est le risque de ce cache comparé à <code>RESULT_CACHE</code> ?</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          CREATE OR REPLACE PACKAGE pkg_cache_dept AS
+            FUNCTION nom (p_dept_id IN departements.dept_id%TYPE) RETURN departements.nom%TYPE;
+            PROCEDURE vider;
+          END;
+          /
+          CREATE OR REPLACE PACKAGE BODY pkg_cache_dept AS
+            TYPE t_cache IS TABLE OF departements.nom%TYPE INDEX BY PLS_INTEGER;
+            g_cache t_cache;
+
+            FUNCTION nom (p_dept_id IN departements.dept_id%TYPE) RETURN departements.nom%TYPE IS
+            BEGIN
+              IF NOT g_cache.EXISTS(p_dept_id) THEN
+                SELECT nom INTO g_cache(p_dept_id) FROM departements WHERE dept_id = p_dept_id;
+              END IF;
+              RETURN g_cache(p_dept_id);
+            EXCEPTION
+              WHEN NO_DATA_FOUND THEN RETURN NULL;
+            END nom;
+
+            PROCEDURE vider IS
+            BEGIN
+              g_cache.DELETE;
+            END vider;
+          END;
+          /
+        </script>
+        <p>Risques : le cache est <strong>par session</strong> (chaque session le remplit, la mémoire PGA est multipliée par le nombre de sessions) et il n'est <strong>jamais invalidé</strong> si quelqu'un renomme un département. <code>RESULT_CACHE</code> est partagé entre sessions et invalidé automatiquement quand la table change.</p>
+      </details>
+    </div>
+  </div>
+
+  <h2>Quiz</h2>
+  <div data-quiz="ch07"></div>
+
+  <h2>Questions d'entretien</h2>
+  <details class="qa"><summary>Peut-on avoir une spécification sans corps ?</summary><div><p>Oui, si elle ne déclare que des éléments sans implémentation : constantes, types, exceptions, variables. C'est courant pour un package de constantes ou de types partagés. Le corps devient obligatoire dès qu'on déclare un sous-programme ou un curseur avec requête cachée.</p></div></details>
+  <details class="qa"><summary>Si je modifie le corps d'un package, les procédures qui l'appellent deviennent-elles invalides ?</summary><div><p>Non. Elles dépendent de la spécification. Seule une modification de la spécification invalide les appelants. C'est un des principaux arguments en faveur des packages.</p></div></details>
+  <details class="qa"><summary>Quelles sont les règles de la surcharge ?</summary><div><p>Les versions doivent différer par le nombre, l'ordre ou la famille de types des paramètres. Différer uniquement par le mode (<code>IN</code>/<code>OUT</code>), par le nom du paramètre, par le type de retour, ou par des sous-types de la même famille (<code>NUMBER</code> / <code>INTEGER</code>) provoque une erreur d'appel ambigu (<code>PLS-00307</code>). On peut surcharger des sous-programmes de package ou locaux, pas des procédures autonomes.</p></div></details>
+  <details class="qa"><summary>Qu'est-ce que SERIALLY_REUSABLE ?</summary><div><p>Un <code>PRAGMA</code> qui limite la durée de vie de l'état d'un package à un seul appel serveur au lieu de toute la session. Il économise de la mémoire dans les systèmes avec beaucoup de sessions, mais le package ne peut alors pas être utilisé depuis SQL ni depuis un trigger.</p></div></details>
+</section>

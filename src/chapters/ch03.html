@@ -1,0 +1,201 @@
+<!-- ===================================================== CH 03 ===================================================== -->
+<section class="chapter" id="ch03" data-num="03" data-group="Fondamentaux" data-min="45" data-title="Structures de contrôle" data-desc="IF, CASE, les trois boucles, CONTINUE, EXIT et les étiquettes de boucle." hidden>
+  <p class="eyebrow">Chapitre 03 · 45 min</p>
+  <h1>Structures de contrôle</h1>
+  <p class="lead">Conditions et boucles sont ce qui distingue PL/SQL du SQL pur. Rien de compliqué ici, mais quelques détails reviennent sans cesse dans les tests de lecture de code.</p>
+  <ul class="goals">
+    <li>choisir entre <code>IF</code>, <code>CASE</code> instruction et <code>CASE</code> expression ;</li>
+    <li>écrire les trois formes de boucle et en sortir proprement ;</li>
+    <li>connaître le comportement exact de la boucle <code>FOR</code>.</li>
+  </ul>
+
+  <h2>Conditions</h2>
+  <script type="text/plsql" data-title="IF / ELSIF / ELSE">
+    DECLARE
+      l_sal employes.salaire%TYPE;
+    BEGIN
+      SELECT salaire INTO l_sal FROM employes WHERE emp_id = 103;
+      IF l_sal >= 6000 THEN
+        DBMS_OUTPUT.PUT_LINE('Cadre supérieur');
+      ELSIF l_sal >= 3500 THEN          -- ELSIF, pas ELSEIF ni ELSE IF
+        DBMS_OUTPUT.PUT_LINE('Confirmé');
+      ELSE
+        DBMS_OUTPUT.PUT_LINE('Junior');
+      END IF;
+    END;
+    /
+  </script>
+  <div class="output">Confirmé</div>
+
+  <h3>Deux CASE différents</h3>
+  <p class="prose">L'<strong>instruction</strong> <code>CASE</code> exécute des instructions et se termine par <code>END CASE;</code>. Si aucune branche ne correspond et qu'il n'y a pas de <code>ELSE</code>, elle lève <code>CASE_NOT_FOUND</code> (ORA-06592). L'<strong>expression</strong> <code>CASE</code> renvoie une valeur, se termine par <code>END</code> et renvoie <code>NULL</code> si rien ne correspond.</p>
+  <script type="text/plsql" data-title="CASE instruction et CASE expression">
+    DECLARE
+      l_poste employes.poste%TYPE := 'DBA';
+      l_libelle VARCHAR2(30);
+    BEGIN
+      -- CASE simple (compare une valeur), utilisé comme expression
+      l_libelle := CASE l_poste
+                     WHEN 'DEV' THEN 'Développeur'
+                     WHEN 'DBA' THEN 'Administrateur BD'
+                     ELSE 'Autre'
+                   END;
+
+      -- CASE recherché (conditions libres), utilisé comme instruction
+      CASE
+        WHEN l_libelle LIKE 'Admin%' THEN DBMS_OUTPUT.PUT_LINE('Accès production');
+        WHEN l_libelle = 'Développeur' THEN DBMS_OUTPUT.PUT_LINE('Accès recette');
+        ELSE DBMS_OUTPUT.PUT_LINE('Aucun accès');
+      END CASE;
+    END;
+    /
+  </script>
+  <div class="callout pitfall"><span class="ct">Piège</span><p><code>CASE l_x WHEN NULL THEN …</code> ne fonctionne jamais : le CASE simple compare avec <code>=</code>. Pour tester NULL, utilise le CASE recherché : <code>CASE WHEN l_x IS NULL THEN …</code>.</p></div>
+
+  <h2>Les trois boucles</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Boucle</th><th>Quand</th><th>Condition testée</th></tr></thead>
+    <tbody>
+      <tr><td><code>LOOP … EXIT WHEN … END LOOP</code></td><td>Nombre d'itérations inconnu, au moins une exécution (lecture d'un curseur)</td><td>Où tu places le <code>EXIT</code></td></tr>
+      <tr><td><code>WHILE cond LOOP … END LOOP</code></td><td>Nombre inconnu, éventuellement zéro</td><td>Avant chaque itération</td></tr>
+      <tr><td><code>FOR i IN a..b LOOP … END LOOP</code></td><td>Nombre connu à l'avance</td><td>Bornes évaluées une seule fois</td></tr>
+    </tbody>
+  </table></div>
+  <script type="text/plsql" data-title="Trois boucles, même résultat">
+    DECLARE
+      i PLS_INTEGER;
+    BEGIN
+      i := 1;
+      LOOP
+        EXIT WHEN i > 3;
+        DBMS_OUTPUT.PUT_LINE('LOOP ' || i);
+        i := i + 1;
+      END LOOP;
+
+      i := 1;
+      WHILE i <= 3 LOOP
+        DBMS_OUTPUT.PUT_LINE('WHILE ' || i);
+        i := i + 1;
+      END LOOP;
+
+      FOR j IN 1 .. 3 LOOP            -- j est déclaré implicitement
+        DBMS_OUTPUT.PUT_LINE('FOR ' || j);
+      END LOOP;
+
+      FOR j IN REVERSE 1 .. 3 LOOP    -- 3, 2, 1 (on n'écrit PAS 3..1)
+        DBMS_OUTPUT.PUT_LINE('REVERSE ' || j);
+      END LOOP;
+    END;
+    /
+  </script>
+  <h3>Ce qu'il faut savoir sur FOR</h3>
+  <ul class="prose">
+    <li>L'indice est déclaré implicitement en <code>PLS_INTEGER</code>, n'existe que dans la boucle et est <strong>en lecture seule</strong> : <code>j := 5</code> provoque <code>PLS-00363</code>.</li>
+    <li>Les bornes sont évaluées <strong>une seule fois</strong> à l'entrée : modifier la variable de borne dans la boucle ne change pas le nombre de tours.</li>
+    <li>Si la borne basse dépasse la borne haute (<code>FOR i IN 5..1</code>), la boucle ne s'exécute pas du tout. Pour descendre : <code>REVERSE 1..5</code>.</li>
+    <li>Le pas est toujours 1. Depuis 21c, on peut écrire <code>FOR i IN 1..10 BY 2</code> ; avant, on multiplie l'indice.</li>
+  </ul>
+
+  <h3>CONTINUE, EXIT et étiquettes</h3>
+  <p class="prose"><code>CONTINUE</code> (depuis 11g) passe à l'itération suivante ; <code>EXIT</code> sort de la boucle. Avec des boucles imbriquées, une étiquette permet de sortir de la boucle externe directement.</p>
+  <div data-stepper="loop-continue"></div>
+  <script type="text/plsql" data-title="Sortir de deux boucles d'un coup">
+    BEGIN
+      <<lignes>>
+      FOR i IN 1 .. 5 LOOP
+        FOR j IN 1 .. 5 LOOP
+          CONTINUE WHEN j > i;              -- n'affiche que le triangle inférieur
+          IF i * j > 9 THEN
+            DBMS_OUTPUT.NEW_LINE;           -- vide la ligne en cours avant de sortir
+            EXIT lignes;                    -- quitte les DEUX boucles
+          END IF;
+          DBMS_OUTPUT.PUT(i * j || ' ');    -- PUT n'ajoute pas de retour à la ligne
+        END LOOP;
+        DBMS_OUTPUT.NEW_LINE;
+      END LOOP lignes;
+    END;
+    /
+  </script>
+  <div class="output">1
+2 4
+3 6 9
+4 8</div>
+  <p class="prose hint">Un texte écrit avec <code>DBMS_OUTPUT.PUT</code> n'apparaît que lorsqu'un <code>NEW_LINE</code> (ou un <code>PUT_LINE</code>) termine la ligne : sans le <code>NEW_LINE</code> avant <code>EXIT</code>, « 4 8 » serait perdu.</p>
+  <div class="callout tip"><span class="ct">Astuce</span><p><code>GOTO</code> existe mais n'a quasiment jamais sa place : un recruteur verra son usage comme un signal négatif. Préfère <code>EXIT</code>, <code>CONTINUE</code> ou un sous-programme.</p></div>
+
+  <h2>Exercices</h2>
+  <div class="ex" data-ex="ch03-e1">
+    <div class="ex-head"><h4>Exercice 1 · FizzBuzz</h4><span class="lvl l1">facile</span></div>
+    <div class="ex-body">
+      <p>Affiche les nombres de 1 à 20, en remplaçant les multiples de 3 par <code>Fizz</code>, de 5 par <code>Buzz</code>, et des deux par <code>FizzBuzz</code>. Classique des tests en direct.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          BEGIN
+            FOR i IN 1 .. 20 LOOP
+              DBMS_OUTPUT.PUT_LINE(
+                CASE
+                  WHEN MOD(i, 15) = 0 THEN 'FizzBuzz'
+                  WHEN MOD(i, 3)  = 0 THEN 'Fizz'
+                  WHEN MOD(i, 5)  = 0 THEN 'Buzz'
+                  ELSE TO_CHAR(i)
+                END);
+            END LOOP;
+          END;
+          /
+        </script>
+        <p class="hint">L'ordre des <code>WHEN</code> compte : le test sur 15 doit venir en premier. Toutes les branches doivent renvoyer le même type, d'où <code>TO_CHAR(i)</code>.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch03-e2">
+    <div class="ex-head"><h4>Exercice 2 · Factorielle et dépassement</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Calcule et affiche <code>n!</code> pour n de 1 à 15 avec une boucle <code>WHILE</code> et une variable <code>PLS_INTEGER</code>. Que se passe-t-il ? Corrige.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <p>Avec <code>PLS_INTEGER</code>, on obtient <code>ORA-01426: numeric overflow</code> à 13! (6 227 020 800 dépasse 2 147 483 647). Il faut un <code>NUMBER</code> pour l'accumulateur.</p>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            n     PLS_INTEGER := 1;
+            l_fac NUMBER := 1;          -- NUMBER : pas de dépassement à 15!
+          BEGIN
+            WHILE n <= 15 LOOP
+              l_fac := l_fac * n;
+              DBMS_OUTPUT.PUT_LINE(n || '! = ' || l_fac);
+              n := n + 1;
+            END LOOP;
+          END;
+          /
+        </script>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch03-e3">
+    <div class="ex-head"><h4>Exercice 3 · Premier salaire au-dessus d'un seuil</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Parcours les identifiants d'employés de 100 à 109 avec un <code>FOR</code>. Pour chacun, lis le salaire. Ignore (avec <code>CONTINUE</code>) les postes <code>COMMERCIAL</code>, et arrête-toi (avec <code>EXIT</code>) au premier salaire inférieur à 2000. Affiche chaque employé traité.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            r employes%ROWTYPE;
+          BEGIN
+            FOR i IN 100 .. 109 LOOP
+              SELECT * INTO r FROM employes WHERE emp_id = i;
+              CONTINUE WHEN r.poste = 'COMMERCIAL';
+              EXIT WHEN r.salaire < 2000;
+              DBMS_OUTPUT.PUT_LINE(r.emp_id || ' ' || r.nom || ' ' || r.salaire);
+            END LOOP;
+          END;
+          /
+        </script>
+        <p class="hint">Ce code fait un <code>SELECT</code> par tour : c'est exactement le « ligne par ligne » qu'on apprendra à éviter (chapitres 04 et 09). Et si un identifiant manquait, <code>NO_DATA_FOUND</code> interromprait tout.</p>
+      </details>
+    </div>
+  </div>
+
+  <h2>Quiz</h2>
+  <div data-quiz="ch03"></div>
+
+  <h2>Questions d'entretien</h2>
+  <details class="qa"><summary>Quelle différence entre EXIT et CONTINUE ?</summary><div><p><code>EXIT</code> quitte la boucle (ou la boucle étiquetée) ; <code>CONTINUE</code> abandonne l'itération en cours et passe à la suivante. Les deux acceptent une forme conditionnelle <code>EXIT WHEN</code> / <code>CONTINUE WHEN</code>.</p></div></details>
+  <details class="qa"><summary>Que fait une instruction CASE sans ELSE quand aucune branche ne correspond ?</summary><div><p>L'instruction <code>CASE … END CASE</code> lève <code>CASE_NOT_FOUND</code> (ORA-06592). L'expression <code>CASE … END</code> renvoie simplement <code>NULL</code>.</p></div></details>
+</section>

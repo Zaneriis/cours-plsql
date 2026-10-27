@@ -1,0 +1,201 @@
+<!-- ===================================================== CH 01 ===================================================== -->
+<section class="chapter" id="ch01" data-num="01" data-group="Fondamentaux" data-min="45" data-title="Architecture et bloc PL/SQL" data-desc="Moteur PL/SQL et moteur SQL, structure d'un bloc, portée des variables, unités stockées." hidden>
+  <p class="eyebrow">Chapitre 01 · 45 min</p>
+  <h1>Architecture et bloc PL/SQL</h1>
+  <p class="lead">PL/SQL est le langage procédural d'Oracle : il ajoute variables, boucles, conditions et gestion d'erreurs autour du SQL, et il s'exécute dans le serveur de base de données, au plus près des données.</p>
+  <ul class="goals">
+    <li>expliquer ce qui se passe entre le moteur PL/SQL et le moteur SQL ;</li>
+    <li>écrire un bloc avec ses quatre sections et des blocs imbriqués ;</li>
+    <li>distinguer bloc anonyme et unités stockées, et retrouver une erreur de compilation.</li>
+  </ul>
+
+  <h2>Deux moteurs dans le serveur</h2>
+  <p class="prose">Quand tu envoies un bloc PL/SQL, le serveur Oracle le confie au <strong>moteur PL/SQL</strong>. Celui-ci exécute lui-même les instructions procédurales (affectations, <code>IF</code>, boucles) et passe chaque ordre SQL au <strong>moteur SQL</strong>. Chaque passage d'un moteur à l'autre est un <strong>changement de contexte</strong> : il a un coût. Toute la partie « performance » du cours (chapitre 09) consiste à en réduire le nombre.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+  C["Client<br/>SQL Developer, appli Java…"] -- "1 seul appel réseau<br/>(le bloc entier)" --> P
+  subgraph S["Serveur Oracle"]
+    P["Moteur PL/SQL<br/>IF, boucles, variables"] -- "ordre SQL" --> Q["Moteur SQL<br/>SELECT, INSERT, UPDATE…"]
+    Q -- "résultat" --> P
+    Q --- D[("Données")]
+  end
+  P -- "résultat / erreur" --> C
+    </pre>
+    <p class="cap">Un seul aller-retour réseau pour tout le bloc, mais un changement de contexte à chaque ordre SQL.</p>
+  </div>
+  <div class="callout interview"><span class="ct">En entretien : « Pourquoi utiliser PL/SQL plutôt que tout faire côté application ? »</span>
+    <ul>
+      <li><strong>Performance</strong> : un seul appel réseau au lieu de dizaines, et le code tourne à côté des données.</li>
+      <li><strong>Sécurité</strong> : on donne <code>EXECUTE</code> sur une procédure sans donner l'accès direct aux tables.</li>
+      <li><strong>Réutilisation et cohérence</strong> : la règle métier est écrite une fois, quel que soit le client (Java, Python, batch).</li>
+      <li><strong>Intégration SQL</strong> : types identiques à ceux des colonnes, SQL statique vérifié à la compilation.</li>
+    </ul>
+  </div>
+
+  <h2>Anatomie d'un bloc</h2>
+  <p class="prose">Tout code PL/SQL est organisé en blocs. Seule la section <code>BEGIN … END</code> est obligatoire.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+  A["DECLARE (optionnel)<br/>variables, constantes, curseurs, types, exceptions"] --> B["BEGIN (obligatoire)<br/>instructions exécutables : SQL + procédural"]
+  B --> E["EXCEPTION (optionnel)<br/>traitement des erreurs levées dans BEGIN"]
+  E --> F["END;"]
+    </pre>
+  </div>
+  <script type="text/plsql" data-title="Un bloc complet">
+    DECLARE
+      c_taux     CONSTANT NUMBER := 0.05;           -- constante : doit être initialisée
+      l_salaire  employes.salaire%TYPE;             -- même type que la colonne
+      l_nom      VARCHAR2(50);
+    BEGIN
+      SELECT nom, salaire
+        INTO l_nom, l_salaire
+        FROM employes
+       WHERE emp_id = 102;
+
+      DBMS_OUTPUT.PUT_LINE(l_nom || ' : ' || l_salaire || ' -> ' || l_salaire * (1 + c_taux));
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        DBMS_OUTPUT.PUT_LINE('Employé inconnu');
+    END;
+    /
+  </script>
+  <div class="output">Petit : 4300 -> 4515</div>
+
+  <h3>Blocs imbriqués et portée</h3>
+  <p class="prose">Un bloc peut contenir d'autres blocs, dans sa section exécutable ou dans sa section d'exception. Une variable est visible dans le bloc qui la déclare et dans ses sous-blocs. Si un sous-bloc redéclare le même nom, il <strong>masque</strong> la variable externe ; on peut encore l'atteindre en <strong>étiquetant</strong> le bloc externe.</p>
+  <script type="text/plsql" data-title="Portée et masquage">
+    <<externe>>
+    DECLARE
+      l_x NUMBER := 10;
+    BEGIN
+      DECLARE
+        l_x NUMBER := 20;   -- masque externe.l_x
+        l_y NUMBER := 5;
+      BEGIN
+        DBMS_OUTPUT.PUT_LINE('interne : ' || l_x || ', externe : ' || externe.l_x);
+      END;
+      -- l_y n'existe plus ici : la référencer donnerait PLS-00201
+      DBMS_OUTPUT.PUT_LINE('après : ' || l_x);
+    END;
+    /
+  </script>
+  <div class="output">interne : 20, externe : 10
+après : 10</div>
+  <div class="callout tip"><span class="ct">Astuce</span><p>Un sous-bloc sert surtout à <strong>isoler une erreur</strong> : on traite l'exception localement et le traitement principal continue (voir chapitre 05).</p></div>
+
+  <h2>Bloc anonyme ou unité stockée</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Type</th><th>Stocké en base ?</th><th>Usage typique</th></tr></thead>
+    <tbody>
+      <tr><td>Bloc anonyme</td><td>Non, compilé à chaque envoi</td><td>Scripts, tests, migrations ponctuelles</td></tr>
+      <tr><td>Procédure</td><td>Oui</td><td>Effectuer une action (mise à jour, traitement)</td></tr>
+      <tr><td>Fonction</td><td>Oui</td><td>Calculer et renvoyer une valeur, utilisable en SQL</td></tr>
+      <tr><td>Package</td><td>Oui</td><td>Regrouper procédures, fonctions, types et variables liés</td></tr>
+      <tr><td>Trigger</td><td>Oui</td><td>Réagir automatiquement à un événement (DML, DDL, connexion)</td></tr>
+      <tr><td>Type objet (corps)</td><td>Oui</td><td>Méthodes d'un type objet SQL</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose">Une unité stockée est compilée une fois et enregistrée dans le dictionnaire de données. Son code source se lit dans <code>USER_SOURCE</code>, son état (<code>VALID</code> / <code>INVALID</code>) dans <code>USER_OBJECTS</code> et ses erreurs de compilation dans <code>USER_ERRORS</code>.</p>
+  <script type="text/plsql" data-title="Retrouver une erreur de compilation">
+    CREATE OR REPLACE PROCEDURE dire_bonjour IS
+    BEGIN
+      DBMS_OUTPUT.PUT_LINE('Bonjour')   -- point-virgule oublié
+    END;
+    /
+    -- Warning: Procedure created with compilation errors.
+
+    SHOW ERRORS               -- SQL*Plus / SQL Developer
+
+    SELECT line, position, text
+      FROM user_errors
+     WHERE name = 'DIRE_BONJOUR';
+  </script>
+  <div class="output">LINE/COL ERROR
+-------- ------------------------------------------------------
+4/1      PLS-00103: Encountered the symbol "END" when expecting one of the following: := . ( % ;</div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Les erreurs <code>PLS-</code> sont des erreurs de <strong>compilation</strong> PL/SQL ; les erreurs <code>ORA-</code> arrivent à l'<strong>exécution</strong> (ou viennent du SQL). Le numéro de ligne d'une erreur <code>PLS-</code> désigne souvent la ligne <em>après</em> l'oubli, comme ici.</p></div>
+
+  <h3>Dépendances et invalidation</h3>
+  <p class="prose">Si une procédure lit la table <code>employes</code> et qu'on ajoute une colonne à cette table, Oracle marque la procédure <code>INVALID</code>. Elle sera recompilée automatiquement au prochain appel (depuis 11g, la dépendance est suivie colonne par colonne, ce qui limite les invalidations inutiles). Les dépendances se lisent dans <code>USER_DEPENDENCIES</code>.</p>
+
+  <h2>Exercices</h2>
+  <div class="ex" data-ex="ch01-e1">
+    <div class="ex-head"><h4>Exercice 1 · Bloc de présentation</h4><span class="lvl l1">facile</span></div>
+    <div class="ex-body">
+      <p>Écris un bloc qui déclare une constante <code>c_appli</code> valant <code>'RH'</code>, une variable date initialisée à <code>SYSDATE</code>, et affiche <code>Application RH - exécuté le 27/10/2026 à 10:15</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            c_appli CONSTANT VARCHAR2(10) := 'RH';
+            l_now   DATE := SYSDATE;
+          BEGIN
+            DBMS_OUTPUT.PUT_LINE('Application ' || c_appli || ' - exécuté le '
+              || TO_CHAR(l_now, 'DD/MM/YYYY') || ' à ' || TO_CHAR(l_now, 'HH24:MI'));
+          END;
+          /
+        </script>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch01-e2">
+    <div class="ex-head"><h4>Exercice 2 · Prédire la sortie</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Sans l'exécuter, que affiche ce bloc ? Vérifie ensuite.</p>
+      <script type="text/plsql" data-title="À prédire">
+        <<b1>>
+        DECLARE
+          v NUMBER := 1;
+        BEGIN
+          <<b2>>
+          DECLARE
+            v NUMBER := 2;
+          BEGIN
+            b1.v := b1.v + v;
+            v := v * 10;
+            DBMS_OUTPUT.PUT_LINE('A=' || v || ' B=' || b1.v);
+          END;
+          DBMS_OUTPUT.PUT_LINE('C=' || v);
+        END;
+        /
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <div class="output" style="margin:8px 0">A=20 B=3
+C=3</div>
+        <p><code>b1.v := b1.v + v</code> modifie la variable <em>externe</em> (1 + 2 = 3). <code>v := v * 10</code> modifie la variable <em>interne</em> (20). Après le sous-bloc, seule la variable externe existe : elle vaut 3.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch01-e3">
+    <div class="ex-head"><h4>Exercice 3 · Corriger la compilation</h4><span class="lvl l1">facile</span></div>
+    <div class="ex-body">
+      <p>Ce bloc contient trois erreurs. Trouve-les.</p>
+      <script type="text/plsql" data-title="Bloc buggé">
+        DECLARE
+          l_total NUMBER
+          c_max   CONSTANT NUMBER;
+        BEGIN
+          l_total = 10;
+          DBMS_OUTPUT.PUT_LINE(l_total);
+        END;
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <ol>
+          <li>Point-virgule manquant après <code>l_total NUMBER</code>.</li>
+          <li>Une <code>CONSTANT</code> doit être initialisée : <code>c_max CONSTANT NUMBER := 100;</code></li>
+          <li>L'affectation s'écrit <code>:=</code>, pas <code>=</code> (qui est l'opérateur de comparaison).</li>
+        </ol>
+        <p class="hint">Bonus : sans <code>/</code> final, le bloc n'est pas envoyé en mode script.</p>
+      </details>
+    </div>
+  </div>
+
+  <h2>Quiz</h2>
+  <div data-quiz="ch01"></div>
+
+  <h2>Questions d'entretien</h2>
+  <details class="qa"><summary>Quelle est la différence entre SQL et PL/SQL ?</summary><div><p>SQL est un langage déclaratif : on décrit le résultat voulu, une instruction à la fois. PL/SQL est un langage procédural qui encapsule du SQL dans des blocs avec variables, conditions, boucles et exceptions. PL/SQL est exécuté par le moteur PL/SQL du serveur ; le SQL qu'il contient est délégué au moteur SQL.</p></div></details>
+  <details class="qa"><summary>Qu'est-ce qu'un bloc anonyme ? Quand l'utiliser ?</summary><div><p>Un bloc sans nom, non stocké, compilé à chaque exécution. On l'utilise pour des scripts ponctuels (migration de données, test, administration). Pour du code appelé régulièrement ou partagé, on crée une procédure, une fonction ou mieux un package.</p></div></details>
+  <details class="qa"><summary>Que se passe-t-il quand on modifie une table utilisée par une procédure ?</summary><div><p>La procédure peut passer à l'état <code>INVALID</code>. Oracle la recompile automatiquement au prochain appel ; si la recompilation échoue (colonne supprimée par exemple), l'appel lève une erreur. On vérifie avec <code>USER_OBJECTS.STATUS</code> et on peut recompiler avec <code>ALTER PROCEDURE … COMPILE</code> ou <code>DBMS_UTILITY.COMPILE_SCHEMA</code>.</p></div></details>
+</section>

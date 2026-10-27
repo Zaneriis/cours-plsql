@@ -1,0 +1,197 @@
+<!-- ===================================================== CH 02 ===================================================== -->
+<section class="chapter" id="ch02" data-num="02" data-group="Fondamentaux" data-min="50" data-title="Variables, types et NULL" data-desc="Types scalaires, %TYPE et %ROWTYPE, SUBTYPE, conversions et la logique à trois valeurs du NULL." hidden>
+  <p class="eyebrow">Chapitre 02 · 50 min</p>
+  <h1>Variables, types et NULL</h1>
+  <p class="lead">Bien typer ses variables évite la moitié des bugs PL/SQL. Et la moitié restante vient souvent de <code>NULL</code>, qui ne se comporte comme aucune autre valeur.</p>
+  <ul class="goals">
+    <li>choisir le bon type scalaire et déclarer par ancrage avec <code>%TYPE</code> / <code>%ROWTYPE</code> ;</li>
+    <li>prévoir le résultat d'une expression qui contient <code>NULL</code> ;</li>
+    <li>éviter les conversions implicites dangereuses.</li>
+  </ul>
+
+  <h2>Déclarer une variable</h2>
+  <script type="text/plsql" data-title="Syntaxe">
+    DECLARE
+      l_compteur   PLS_INTEGER := 0;                 -- entier rapide (arithmétique machine)
+      l_montant    NUMBER(10,2) DEFAULT 0;           -- DEFAULT et := sont équivalents
+      l_code       VARCHAR2(10) NOT NULL := 'A01';   -- NOT NULL impose une valeur initiale
+      c_tva        CONSTANT NUMBER := 0.2;
+      l_actif      BOOLEAN := TRUE;                  -- type PL/SQL (en SQL seulement depuis 23ai)
+      l_embauche   DATE := DATE '2024-01-15';        -- littéral date ISO, indépendant de NLS
+      l_horodatage TIMESTAMP := SYSTIMESTAMP;
+    BEGIN
+      NULL;  -- instruction vide : un BEGIN ne peut pas être vide
+    END;
+    /
+  </script>
+
+  <h3>Les types à connaître</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Type</th><th>À retenir</th></tr></thead>
+    <tbody>
+      <tr><td><code>NUMBER(p,s)</code></td><td>Décimal exact, jusqu'à 38 chiffres. Type par défaut pour les montants.</td></tr>
+      <tr><td><code>PLS_INTEGER</code></td><td>Entier signé 32 bits, plus rapide que <code>NUMBER</code> pour compteurs et indices. Lève une erreur en cas de dépassement. <code>BINARY_INTEGER</code> est un synonyme.</td></tr>
+      <tr><td><code>SIMPLE_INTEGER</code></td><td>Comme <code>PLS_INTEGER</code> mais <code>NOT NULL</code> et sans contrôle de dépassement : encore plus rapide en compilation native.</td></tr>
+      <tr><td><code>VARCHAR2(n)</code></td><td>Chaîne variable. Jusqu'à 32 767 octets en PL/SQL, mais 4 000 en colonne SQL (32 767 si <code>MAX_STRING_SIZE = EXTENDED</code>). Préciser <code>n CHAR</code> pour compter en caractères.</td></tr>
+      <tr><td><code>CHAR(n)</code></td><td>Longueur fixe, complétée par des espaces. À éviter : source de comparaisons surprenantes.</td></tr>
+      <tr><td><code>DATE</code></td><td>Date <em>et</em> heure à la seconde. <code>TRUNC(d)</code> retire l'heure.</td></tr>
+      <tr><td><code>TIMESTAMP</code></td><td>Fractions de seconde, variantes avec fuseau horaire.</td></tr>
+      <tr><td><code>BOOLEAN</code></td><td><code>TRUE</code>, <code>FALSE</code> ou <code>NULL</code>. Avant 23ai, impossible de le renvoyer à une requête SQL.</td></tr>
+      <tr><td><code>CLOB</code> / <code>BLOB</code></td><td>Grands objets texte / binaires (jusqu'à plusieurs To).</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Déclarations ancrées : %TYPE et %ROWTYPE</h2>
+  <p class="prose">Plutôt que de recopier <code>NUMBER(8,2)</code>, on ancre la variable sur la colonne. Si la colonne change de taille, le code suit sans modification.</p>
+  <script type="text/plsql" data-title="Ancrage">
+    DECLARE
+      l_sal      employes.salaire%TYPE;        -- type de la colonne
+      l_sal_max  l_sal%TYPE;                   -- type d'une autre variable
+      r_emp      employes%ROWTYPE;             -- un enregistrement avec toutes les colonnes
+    BEGIN
+      SELECT * INTO r_emp FROM employes WHERE emp_id = 104;
+      l_sal := r_emp.salaire;
+      DBMS_OUTPUT.PUT_LINE(r_emp.prenom || ' ' || r_emp.nom || ' (' || r_emp.poste || ') : ' || l_sal);
+    END;
+    /
+  </script>
+  <div class="output">Emma Leroy (DBA) : 4800</div>
+  <div class="callout interview"><span class="ct">En entretien</span><p>« Pourquoi <code>%TYPE</code> ? » Réponse attendue : maintenance (le code s'adapte au schéma), lisibilité (on voit d'où vient la donnée) et absence de <code>VALUE_ERROR</code> quand une colonne s'agrandit. Limite : <code>%TYPE</code> n'hérite pas de la contrainte <code>NOT NULL</code> de la colonne.</p></div>
+
+  <h3>SUBTYPE : nommer une règle</h3>
+  <script type="text/plsql" data-title="Sous-types">
+    DECLARE
+      SUBTYPE t_pourcentage IS NUMBER(5,2);
+      SUBTYPE t_code_poste  IS employes.poste%TYPE;
+      l_hausse t_pourcentage := 3.5;
+      l_poste  t_code_poste  := 'DEV';
+    BEGIN
+      DBMS_OUTPUT.PUT_LINE(l_poste || ' +' || l_hausse || '%');
+    END;
+    /
+  </script>
+
+  <h2>NULL : la logique à trois valeurs</h2>
+  <p class="prose"><code>NULL</code> veut dire « inconnu ». Toute comparaison avec un inconnu donne un résultat inconnu, donc <code>NULL</code>, ni vrai ni faux. Un <code>IF</code> dont la condition vaut <code>NULL</code> se comporte comme si elle était fausse : on passe dans le <code>ELSE</code>.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Expression</th><th>Résultat</th><th>Pourquoi</th></tr></thead>
+    <tbody>
+      <tr><td><code>NULL = NULL</code></td><td><code>NULL</code></td><td>Deux inconnus ne sont pas forcément égaux. Utiliser <code>IS NULL</code>.</td></tr>
+      <tr><td><code>5 + NULL</code></td><td><code>NULL</code></td><td>Toute arithmétique avec NULL donne NULL.</td></tr>
+      <tr><td><code>'abc' || NULL</code></td><td><code>'abc'</code></td><td>Exception Oracle : la concaténation ignore NULL.</td></tr>
+      <tr><td><code>'' IS NULL</code></td><td><code>TRUE</code></td><td>Dans Oracle, la chaîne vide <em>est</em> NULL.</td></tr>
+      <tr><td><code>NULL AND FALSE</code></td><td><code>FALSE</code></td><td>Faux quelle que soit l'inconnue.</td></tr>
+      <tr><td><code>NULL OR TRUE</code></td><td><code>TRUE</code></td><td>Vrai quelle que soit l'inconnue.</td></tr>
+      <tr><td><code>NOT NULL</code> (la valeur)</td><td><code>NULL</code></td><td>L'inverse d'un inconnu reste inconnu.</td></tr>
+      <tr><td><code>x NOT IN (1, NULL)</code></td><td><code>NULL</code> (jamais vrai)</td><td>Piège SQL classique : un <code>NOT IN</code> sur une sous-requête qui renvoie un NULL ne ramène aucune ligne.</td></tr>
+    </tbody>
+  </table></div>
+  <div data-stepper="null-if"></div>
+  <script type="text/plsql" data-title="Les fonctions qui gèrent NULL">
+    SELECT nom,
+           salaire + commission                       AS faux_total,     -- NULL si pas de commission
+           salaire + NVL(commission, 0)               AS total,          -- remplace NULL par 0
+           NVL2(commission, 'avec prime', 'sans')     AS statut,         -- valeur si non nul / si nul
+           COALESCE(commission, 0)                    AS prime,          -- 1re valeur non nulle d'une liste
+           NULLIF(poste, 'STAGIAIRE')                 AS poste_reel      -- NULL si égalité
+      FROM employes
+     WHERE dept_id = 30;
+  </script>
+  <div class="callout pitfall"><span class="ct">Piège</span><p><code>IF l_a != l_b THEN</code> ne détecte pas un changement de <code>NULL</code> vers une valeur. Pour comparer deux valeurs potentiellement nulles (dans un trigger d'audit par exemple), écris <code>IF l_a != l_b OR (l_a IS NULL AND l_b IS NOT NULL) OR (l_a IS NOT NULL AND l_b IS NULL)</code>, ou utilise <code>DECODE(l_a, l_b, 0, 1) = 1</code> qui traite deux NULL comme égaux.</p></div>
+
+  <h2>Conversions</h2>
+  <p class="prose">Oracle convertit implicitement les types quand il le peut, en s'appuyant sur les paramètres de session (<code>NLS_DATE_FORMAT</code>, <code>NLS_NUMERIC_CHARACTERS</code>). Un code qui marche sur ton poste peut donc échouer sur le serveur de production. Convertis toujours explicitement avec un masque.</p>
+  <script type="text/plsql" data-title="Conversions explicites">
+    DECLARE
+      l_d DATE;
+      l_n NUMBER;
+    BEGIN
+      l_d := TO_DATE('15/01/2024', 'DD/MM/YYYY');               -- jamais TO_DATE('15/01/2024') seul
+      l_n := TO_NUMBER('1234,56', '9999D99', 'NLS_NUMERIC_CHARACTERS='', ''');
+      DBMS_OUTPUT.PUT_LINE(TO_CHAR(l_d, 'Day DD Month YYYY', 'NLS_DATE_LANGUAGE=FRENCH'));
+      DBMS_OUTPUT.PUT_LINE(TO_CHAR(l_n, 'FM999G990D00'));
+    END;
+    /
+  </script>
+  <div class="callout pitfall"><span class="ct">Piège</span><p><code>WHERE date_embauche = '01/03/2015'</code> fonctionne… tant que <code>NLS_DATE_FORMAT</code> vaut <code>DD/MM/YYYY</code>. Et <code>WHERE TO_CHAR(id) = l_texte</code> empêche l'utilisation de l'index sur <code>id</code>. Conversion implicite sur une colonne indexée = index ignoré.</p></div>
+  <p class="prose">Erreurs de conversion fréquentes : <code>ORA-06502: PL/SQL: numeric or value error</code> (exception <code>VALUE_ERROR</code>, par exemple une chaîne trop longue pour la variable) et <code>ORA-01722: invalid number</code> (<code>INVALID_NUMBER</code>, levée dans un ordre SQL).</p>
+
+  <h2>Exercices</h2>
+  <div class="ex" data-ex="ch02-e1">
+    <div class="ex-head"><h4>Exercice 1 · Rémunération annuelle</h4><span class="lvl l1">facile</span></div>
+    <div class="ex-body">
+      <p>Pour l'employé 106, affiche la rémunération annuelle = 12 × (salaire + commission). Utilise des déclarations ancrées. Fais ensuite tourner le code pour l'employé 102 (sans commission) : le résultat doit être correct aussi.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            l_sal   employes.salaire%TYPE;
+            l_comm  employes.commission%TYPE;
+            l_nom   employes.nom%TYPE;
+          BEGIN
+            SELECT nom, salaire, commission INTO l_nom, l_sal, l_comm
+              FROM employes WHERE emp_id = 106;
+            DBMS_OUTPUT.PUT_LINE(l_nom || ' : ' || 12 * (l_sal + NVL(l_comm, 0)));
+          END;
+          /
+        </script>
+        <p>Sans <code>NVL</code>, l'employé 102 obtiendrait <code>NULL</code> et l'affichage serait <code>Petit : </code>.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch02-e2">
+    <div class="ex-head"><h4>Exercice 2 · Prédire les NULL</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Qu'affiche chaque ligne ?</p>
+      <script type="text/plsql" data-title="À prédire">
+        DECLARE
+          a NUMBER;          -- non initialisée
+          b VARCHAR2(10) := '';
+        BEGIN
+          IF a = a THEN DBMS_OUTPUT.PUT_LINE('1 vrai'); ELSE DBMS_OUTPUT.PUT_LINE('1 faux'); END IF;
+          IF b IS NULL THEN DBMS_OUTPUT.PUT_LINE('2 vide'); END IF;
+          DBMS_OUTPUT.PUT_LINE('3 [' || LENGTH(b) || ']');
+          IF NOT (a > 0) THEN DBMS_OUTPUT.PUT_LINE('4 a<=0'); ELSE DBMS_OUTPUT.PUT_LINE('4 ?'); END IF;
+          DBMS_OUTPUT.PUT_LINE('5 ' || NVL(TO_CHAR(a + 1), 'inconnu'));
+        END;
+        /
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <div class="output" style="margin:8px 0">1 faux
+2 vide
+3 []
+4 ?
+5 inconnu</div>
+        <p>1 : <code>NULL = NULL</code> est NULL, donc ELSE. 2 : <code>''</code> est NULL. 3 : <code>LENGTH(NULL)</code> est NULL (et pas 0), concaténé comme une chaîne vide. 4 : <code>NOT NULL</code> reste NULL, donc ELSE. 5 : <code>NULL + 1</code> est NULL.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch02-e3">
+    <div class="ex-head"><h4>Exercice 3 · Ancienneté</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Affiche pour l'employée 104 son ancienneté en années complètes et en mois restants (ex. <code>Leroy : 8 an(s) et 6 mois</code>). Indice : <code>MONTHS_BETWEEN</code>, <code>TRUNC</code>, <code>MOD</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            r_emp   employes%ROWTYPE;
+            l_mois  PLS_INTEGER;
+          BEGIN
+            SELECT * INTO r_emp FROM employes WHERE emp_id = 104;
+            l_mois := TRUNC(MONTHS_BETWEEN(SYSDATE, r_emp.date_embauche));
+            DBMS_OUTPUT.PUT_LINE(r_emp.nom || ' : ' || TRUNC(l_mois / 12) || ' an(s) et '
+                                 || MOD(l_mois, 12) || ' mois');
+          END;
+          /
+        </script>
+        <p class="hint">Attention : affecter <code>3.7</code> à un <code>PLS_INTEGER</code> l'<em>arrondit</em> (4), il ne tronque pas. D'où le <code>TRUNC</code> explicite.</p>
+      </details>
+    </div>
+  </div>
+
+  <h2>Quiz</h2>
+  <div data-quiz="ch02"></div>
+
+  <h2>Questions d'entretien</h2>
+  <details class="qa"><summary>Différence entre VARCHAR2 et CHAR ?</summary><div><p><code>CHAR(n)</code> a une longueur fixe et complète avec des espaces ; <code>VARCHAR2(n)</code> stocke la longueur réelle. Avec <code>CHAR</code>, comparer à une variable <code>VARCHAR2</code> peut échouer à cause des espaces de remplissage. On utilise <code>VARCHAR2</code> sauf cas très particulier.</p></div></details>
+  <details class="qa"><summary>Différence entre NVL et COALESCE ?</summary><div><p><code>NVL(a, b)</code> prend exactement deux arguments et évalue toujours les deux. <code>COALESCE(a, b, c…)</code> accepte une liste, renvoie la première valeur non nulle et s'arrête dès qu'il la trouve (évaluation paresseuse). <code>COALESCE</code> est aussi standard SQL ANSI.</p></div></details>
+  <details class="qa"><summary>Pourquoi PLS_INTEGER plutôt que NUMBER pour un compteur ?</summary><div><p><code>PLS_INTEGER</code> utilise l'arithmétique native du processeur alors que <code>NUMBER</code> est une représentation décimale logicielle. Le gain est réel dans les boucles serrées. En contrepartie, la plage est limitée à ±2 147 483 647.</p></div></details>
+</section>
