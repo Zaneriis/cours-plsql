@@ -16,9 +16,9 @@
   <script type="text/plsql" data-title="Trois façons d'avoir un record">
     DECLARE
       r_emp  employes%ROWTYPE;                        -- forme d'une table
-      CURSOR c IS SELECT e.nom, d.nom AS dept
+      CURSOR cur_emp_dept IS SELECT e.nom, d.nom AS dept
                     FROM employes e JOIN departements d USING (dept_id);
-      r_c    c%ROWTYPE;                               -- forme d'un curseur
+      r_c    cur_emp_dept%ROWTYPE;                    -- forme d'un curseur
       TYPE t_paie IS RECORD (                         -- forme libre
         emp_id   employes.emp_id%TYPE,
         brut     NUMBER(10,2),
@@ -118,12 +118,12 @@ STAGIAIRE   1</div>
   <p class="prose">L'élément d'une collection peut être un record. Indexer un tableau associatif par la clé métier (ici <code>emp_id</code>) donne un cache en mémoire où l'accès se fait directement par la clé.</p>
   <script type="text/plsql" data-title="Cache d'employés indexé par emp_id">
     DECLARE
-      CURSOR c_emp IS SELECT * FROM employes WHERE dept_id = 30;
-      TYPE t_cache IS TABLE OF c_emp%ROWTYPE INDEX BY PLS_INTEGER;
+      CURSOR cur_emp IS SELECT * FROM employes WHERE dept_id = 30;
+      TYPE t_cache IS TABLE OF cur_emp%ROWTYPE INDEX BY PLS_INTEGER;
       l_emp t_cache;
       i     PLS_INTEGER;
     BEGIN
-      FOR r IN c_emp LOOP
+      FOR r IN cur_emp LOOP
         l_emp(r.emp_id) := r;                         -- l'indice est la clé métier
       END LOOP;
 
@@ -209,7 +209,7 @@ COUNT=2 LAST=3
   <div class="callout interview"><span class="ct">En entretien</span><p>Si on te demande « comment parcourir une collection en toute sécurité ? », la réponse attendue est la boucle <code>i := c.FIRST; WHILE i IS NOT NULL LOOP … i := c.NEXT(i); END LOOP;</code>, qui fonctionne pour une collection vide, dense ou creuse, et pour un index chaîne.</p></div>
 
   <h2>Collections en SQL</h2>
-  <p class="prose">Un type créé au niveau schéma (<code>CREATE TYPE</code>) est connu du moteur SQL : on peut interroger une collection comme une table avec <code>TABLE()</code> (la colonne s'appelle <code>column_value</code> pour un type scalaire) et utiliser les opérateurs ensemblistes <code>MULTISET</code>. Ce type <code>t_liste_id</code> est réutilisé dans les chapitres suivants.</p>
+  <p class="prose">Un type créé au niveau schéma (<code>CREATE TYPE</code>) est connu du moteur SQL : on peut interroger une collection comme une table avec <code>TABLE()</code> (la colonne s'appelle <code>column_value</code> pour un type scalaire) et utiliser les opérateurs ensemblistes <code>MULTISET</code>. Garde ce type <code>t_liste_id</code> : il sert dans la suite de ce chapitre et dans les exercices.</p>
   <script type="text/plsql" data-title="TABLE() et MULTISET">
     CREATE OR REPLACE TYPE t_liste_id AS TABLE OF NUMBER;
     /

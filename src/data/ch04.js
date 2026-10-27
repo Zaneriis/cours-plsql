@@ -16,36 +16,36 @@ STEPPERS["cursor"] = {
   title: "Cycle de vie d'un curseur explicite",
   code: `
 DECLARE
-  CURSOR c_tech IS
+  CURSOR cur_tech IS
     SELECT nom, salaire FROM employes
      WHERE poste IN ('DEV', 'DBA') ORDER BY nom;
   l_nom employes.nom%TYPE;
   l_sal employes.salaire%TYPE;
 BEGIN
-  OPEN c_tech;
+  OPEN cur_tech;
   LOOP
-    FETCH c_tech INTO l_nom, l_sal;
-    EXIT WHEN c_tech%NOTFOUND;
-    DBMS_OUTPUT.PUT_LINE(c_tech%ROWCOUNT || '. ' || l_nom || ' ' || l_sal);
+    FETCH cur_tech INTO l_nom, l_sal;
+    EXIT WHEN cur_tech%NOTFOUND;
+    DBMS_OUTPUT.PUT_LINE(cur_tech%ROWCOUNT || '. ' || l_nom || ' ' || l_sal);
   END LOOP;
-  DBMS_OUTPUT.PUT_LINE('Lignes lues : ' || c_tech%ROWCOUNT);
-  CLOSE c_tech;
+  DBMS_OUTPUT.PUT_LINE('Lignes lues : ' || cur_tech%ROWCOUNT);
+  CLOSE cur_tech;
 END;`,
   table: { cols: ["nom", "salaire"], rows: [["Durand", "3900"], ["Leroy", "4800"], ["Petit", "4300"]], caption: "Jeu de résultats figé à l'OPEN (postes DEV et DBA, tri par nom)" },
   steps: [
-    { l: [2, 3, 4], n: "<strong>Déclaration</strong> : le curseur n'est qu'une requête nommée. Rien n'est exécuté, aucune ligne n'est lue.", v: { "c_tech%ISOPEN": "FALSE" } },
+    { l: [2, 3, 4], n: "<strong>Déclaration</strong> : le curseur n'est qu'une requête nommée. Rien n'est exécuté, aucune ligne n'est lue.", v: { "cur_tech%ISOPEN": "FALSE" } },
     { l: [5, 6], n: "Variables de réception, ancrées sur les colonnes avec <code>%TYPE</code>.", v: { l_nom: "NULL", l_sal: "NULL" } },
-    { l: 8, n: "<strong>OPEN</strong> : Oracle exécute la requête et fige l'image des données. Le pointeur est placé <em>avant</em> la première ligne. <code>%NOTFOUND</code> vaut NULL tant qu'aucun FETCH n'a eu lieu.", v: { "c_tech%ISOPEN": "TRUE", "c_tech%NOTFOUND": "NULL", "c_tech%ROWCOUNT": "0" } },
-    { l: 10, n: "<strong>FETCH</strong> : lit la ligne suivante, Durand, et avance le pointeur.", v: { l_nom: "Durand", l_sal: "3900", "c_tech%NOTFOUND": "FALSE", "c_tech%ROWCOUNT": "1" }, p: 0 },
+    { l: 8, n: "<strong>OPEN</strong> : Oracle exécute la requête et fige l'image des données. Le pointeur est placé <em>avant</em> la première ligne. <code>%NOTFOUND</code> vaut NULL tant qu'aucun FETCH n'a eu lieu.", v: { "cur_tech%ISOPEN": "TRUE", "cur_tech%NOTFOUND": "NULL", "cur_tech%ROWCOUNT": "0" } },
+    { l: 10, n: "<strong>FETCH</strong> : lit la ligne suivante, Durand, et avance le pointeur.", v: { l_nom: "Durand", l_sal: "3900", "cur_tech%NOTFOUND": "FALSE", "cur_tech%ROWCOUNT": "1" }, p: 0 },
     { l: 11, n: "<code>%NOTFOUND</code> vaut FALSE : on reste dans la boucle." },
     { l: 12, n: "Affichage, avec le rang de la ligne donné par <code>%ROWCOUNT</code>.", o: "1. Durand 3900" },
-    { l: 10, n: "Deuxième FETCH : Leroy.", v: { l_nom: "Leroy", l_sal: "4800", "c_tech%ROWCOUNT": "2" }, p: 1 },
+    { l: 10, n: "Deuxième FETCH : Leroy.", v: { l_nom: "Leroy", l_sal: "4800", "cur_tech%ROWCOUNT": "2" }, p: 1 },
     { l: [11, 12], n: "Toujours une ligne : on affiche.", o: "2. Leroy 4800" },
-    { l: 10, n: "Troisième FETCH : Petit.", v: { l_nom: "Petit", l_sal: "4300", "c_tech%ROWCOUNT": "3" }, p: 2 },
+    { l: 10, n: "Troisième FETCH : Petit.", v: { l_nom: "Petit", l_sal: "4300", "cur_tech%ROWCOUNT": "3" }, p: 2 },
     { l: [11, 12], n: "On affiche la dernière ligne.", o: "3. Petit 4300" },
-    { l: 10, n: "Quatrième FETCH : plus de ligne. <code>%NOTFOUND</code> passe à TRUE, <code>%ROWCOUNT</code> reste à 3, et <strong>les variables gardent leurs anciennes valeurs</strong> (Petit, 4300).", v: { "c_tech%NOTFOUND": "TRUE" }, p: null },
+    { l: 10, n: "Quatrième FETCH : plus de ligne. <code>%NOTFOUND</code> passe à TRUE, <code>%ROWCOUNT</code> reste à 3, et <strong>les variables gardent leurs anciennes valeurs</strong> (Petit, 4300).", v: { "cur_tech%NOTFOUND": "TRUE" }, p: null },
     { l: 11, n: "<strong>EXIT</strong> : placé juste après le FETCH, il évite de réafficher Petit une seconde fois." },
     { l: 14, n: "Le curseur est encore ouvert : <code>%ROWCOUNT</code> donne le nombre total de lignes lues.", o: "Lignes lues : 3" },
-    { l: 15, n: "<strong>CLOSE</strong> : libère la zone de travail. Désormais, lire <code>%NOTFOUND</code> ou <code>%ROWCOUNT</code> lèverait INVALID_CURSOR.", v: { "c_tech%ISOPEN": "FALSE", "c_tech%NOTFOUND": "(INVALID_CURSOR)", "c_tech%ROWCOUNT": "(INVALID_CURSOR)" } }
+    { l: 15, n: "<strong>CLOSE</strong> : libère la zone de travail. Désormais, lire <code>%NOTFOUND</code> ou <code>%ROWCOUNT</code> lèverait INVALID_CURSOR.", v: { "cur_tech%ISOPEN": "FALSE", "cur_tech%NOTFOUND": "(INVALID_CURSOR)", "cur_tech%ROWCOUNT": "(INVALID_CURSOR)" } }
   ]
 };

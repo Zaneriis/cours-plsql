@@ -161,7 +161,7 @@ flowchart TB
     </tbody>
   </table></div>
   <div class="callout pitfall"><span class="ct">Piège : une procédure qui échoue n'annule pas son propre travail</span>
-    <p>Si une procédure appelée lève une exception et que <strong>l'appelant PL/SQL l'intercepte</strong>, les DML déjà faits par la procédure ne sont <strong>pas</strong> annulés : seul l'ordre fautif l'est. Ses paramètres <code>OUT</code> ne sont pas non plus renseignés (sauf ceux passés avec <code>NOCOPY</code>, qui peuvent garder une valeur partielle). Si tu veux un « tout ou rien » pour la procédure, pose un <code>SAVEPOINT</code> au début et fais <code>ROLLBACK TO</code> ce point dans le gestionnaire avant de re-lever (chapitre 11).</p>
+    <p>Si une procédure appelée lève une exception et que <strong>l'appelant PL/SQL l'intercepte</strong>, les DML déjà faits par la procédure ne sont <strong>pas</strong> annulés : seul l'ordre fautif l'est. Ses paramètres <code>OUT</code> ne sont pas non plus renseignés (sauf ceux passés avec <code>NOCOPY</code>, qui peuvent garder une valeur partielle ; voir le <a href="#ch06">chapitre 06</a>). Si tu veux un « tout ou rien » pour la procédure, pose un <code>SAVEPOINT</code> au début et fais <code>ROLLBACK TO</code> ce point dans le gestionnaire avant de re-lever (<a href="#ch11">chapitre 11</a>).</p>
   </div>
   <div class="callout interview"><span class="ct">En entretien : « Que devient la transaction si une exception n'est pas traitée ? »</span>
     <p>Réponds en trois temps. 1) L'ordre fautif est toujours annulé (rollback au niveau instruction). 2) Si l'exception remonte jusqu'au client, tout ce que l'appel (bloc anonyme, <code>EXEC</code>) a modifié est annulé, mais pas le travail antérieur de la transaction, qui reste ouverte. 3) Si l'exception est traitée dans le code, rien d'autre n'est annulé automatiquement : c'est au développeur de décider (<code>ROLLBACK</code>, <code>ROLLBACK TO SAVEPOINT</code> ou rien).</p>
@@ -243,12 +243,12 @@ ORA-06512: at line 6</div>
   <div class="ex" data-ex="ch05-e1">
     <div class="ex-head"><h4>Exercice 1 · Division sûre</h4><span class="lvl l1">facile</span></div>
     <div class="ex-body">
-      <p>Écris une fonction <code>diviser(a NUMBER, b NUMBER) RETURN NUMBER</code> qui renvoie <code>NULL</code> en cas de division par zéro, mais laisse passer toute autre erreur.</p>
+      <p>Écris une fonction <code>diviser(p_a IN NUMBER, p_b IN NUMBER) RETURN NUMBER</code> qui renvoie <code>NULL</code> en cas de division par zéro, mais laisse passer toute autre erreur.</p>
       <details class="sol"><summary>Voir la solution</summary>
         <script type="text/plsql" data-title="Solution">
-          CREATE OR REPLACE FUNCTION diviser (a IN NUMBER, b IN NUMBER) RETURN NUMBER IS
+          CREATE OR REPLACE FUNCTION diviser (p_a IN NUMBER, p_b IN NUMBER) RETURN NUMBER IS
           BEGIN
-            RETURN a / b;
+            RETURN p_a / p_b;
           EXCEPTION
             WHEN ZERO_DIVIDE THEN
               RETURN NULL;
@@ -321,7 +321,7 @@ E</div>
 
           EXEC embaucher('Blanc', 'DEV', 3500, 99);   -- ORA-20011: Département 99 inexistant
         </script>
-        <p class="hint">Grâce à <code>TRUE</code>, la pile contient aussi l'ORA-02291 d'origine sous l'ORA-20011. Pas de <code>COMMIT</code> dans la procédure : c'est à l'appelant de décider de la fin de transaction (chapitre 11). Note qu'une valeur de séquence est consommée même quand l'insertion échoue : les séquences ne garantissent pas l'absence de trous.</p>
+        <p class="hint">Grâce à <code>TRUE</code>, la pile contient aussi l'ORA-02291 d'origine sous l'ORA-20011. Pas de <code>COMMIT</code> dans la procédure : c'est à l'appelant de décider de la fin de transaction (<a href="#ch11">chapitre 11</a>). Note qu'une valeur de séquence est consommée même quand l'insertion échoue : les séquences ne garantissent pas l'absence de trous.</p>
       </details>
     </div>
   </div>

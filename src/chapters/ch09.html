@@ -22,7 +22,7 @@
   <div class="callout tip"><span class="ct">Astuce : la boucle FOR de curseur lit déjà par lots</span><p>Depuis 10g, avec <code>PLSQL_OPTIMIZE_LEVEL</code> à 2 (la valeur par défaut) ou plus, le compilateur transforme <code>FOR r IN (SELECT …) LOOP</code> en lecture par paquets de 100 lignes. La <strong>lecture</strong> est donc déjà optimisée. En revanche, un <code>UPDATE</code> ou un <code>INSERT</code> placé dans la boucle reste exécuté ligne par ligne : c'est là que <code>FORALL</code> fait la différence.</p></div>
 
   <h2>BULK COLLECT : lire en masse</h2>
-  <p class="prose"><code>BULK COLLECT INTO</code> remplit une ou plusieurs collections en un seul appel. Les types de collections sont détaillés au <a href="#ch08">chapitre 08</a> ; ici on utilise surtout des <em>nested tables</em> locales.</p>
+  <p class="prose"><code>BULK COLLECT INTO</code> remplit une ou plusieurs collections en un seul appel. Les types de collections sont détaillés au <a href="#ch08">chapitre 08</a> ; ici on utilise surtout des tables imbriquées (<em>nested tables</em>) locales.</p>
   <script type="text/plsql" data-title="Charger tout un résultat d'un coup">
     DECLARE
       TYPE t_emps IS TABLE OF employes%ROWTYPE;          -- pas besoin d'initialiser : BULK COLLECT le fait
@@ -47,16 +47,16 @@ Michel</div>
   <p class="prose">Avec un curseur explicite, <code>FETCH … BULK COLLECT INTO … LIMIT n</code> lit au plus <code>n</code> lignes à chaque appel. La collection est <strong>vidée puis remplie</strong> à chaque <code>FETCH</code> (les lots ne s'accumulent pas), ce qui borne la mémoire.</p>
   <script type="text/plsql" data-title="Traitement par lots de 1 000 lignes">
     DECLARE
-      CURSOR c IS SELECT emp_id, salaire FROM employes;
+      CURSOR cur_emps IS SELECT emp_id, salaire FROM employes;
       TYPE t_ids  IS TABLE OF employes.emp_id%TYPE;
       TYPE t_sals IS TABLE OF employes.salaire%TYPE;
       l_ids  t_ids;
       l_sals t_sals;
     BEGIN
-      OPEN c;
+      OPEN cur_emps;
       LOOP
-        FETCH c BULK COLLECT INTO l_ids, l_sals LIMIT 1000;
-        EXIT WHEN l_ids.COUNT = 0;                    -- et PAS c%NOTFOUND ici
+        FETCH cur_emps BULK COLLECT INTO l_ids, l_sals LIMIT 1000;
+        EXIT WHEN l_ids.COUNT = 0;                    -- et PAS cur_emps%NOTFOUND ici
 
         FOR i IN 1 .. l_ids.COUNT LOOP                -- calcul en mémoire, sans SQL
           l_sals(i) := ROUND(l_sals(i) * 1.02, 2);
@@ -65,14 +65,14 @@ Michel</div>
         FORALL i IN 1 .. l_ids.COUNT                  -- un seul aller-retour pour tout le lot
           UPDATE employes SET salaire = l_sals(i) WHERE emp_id = l_ids(i);
       END LOOP;
-      CLOSE c;
+      CLOSE cur_emps;
       ROLLBACK;                                       -- exemple : on remet le schéma en l'état
     END;
     /
   </script>
   <p class="prose">Pour voir pourquoi on teste <code>COUNT = 0</code>, suis un curseur de 5 lignes lu par lots de 2 :</p>
   <div data-stepper="ch09-limit"></div>
-  <div class="callout pitfall"><span class="ct">Piège d'entretien : EXIT WHEN c%NOTFOUND</span><p>Si le dernier lot contient moins de lignes que <code>LIMIT</code> (1 ligne sur 2 dans l'animation, 350 sur 1 000 en vrai), <code>c%NOTFOUND</code> est déjà <code>TRUE</code> après ce <code>FETCH</code>. Avec <code>EXIT WHEN c%NOTFOUND</code> juste après le <code>FETCH</code>, ces lignes ne sont jamais traitées. Soit on teste <code>COUNT = 0</code> juste après le <code>FETCH</code> (au prix d'un dernier <code>FETCH</code> vide), soit on met <code>EXIT WHEN c%NOTFOUND</code> à la <strong>fin</strong> de la boucle, après le traitement du lot.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège d'entretien : EXIT WHEN cur_emps%NOTFOUND</span><p>Si le dernier lot contient moins de lignes que <code>LIMIT</code> (1 ligne sur 2 dans l'animation, 350 sur 1 000 en vrai), <code>cur_emps%NOTFOUND</code> est déjà <code>TRUE</code> après ce <code>FETCH</code>. Avec <code>EXIT WHEN cur_emps%NOTFOUND</code> juste après le <code>FETCH</code>, ces lignes ne sont jamais traitées. Soit on teste <code>COUNT = 0</code> juste après le <code>FETCH</code> (au prix d'un dernier <code>FETCH</code> vide), soit on met <code>EXIT WHEN cur_emps%NOTFOUND</code> à la <strong>fin</strong> de la boucle, après le traitement du lot.</p></div>
   <div class="callout tip"><span class="ct">Astuce : quelle valeur pour LIMIT ?</span><p>Entre 100 et 1 000 : l'essentiel du gain est atteint dès 100, et au-delà la mémoire augmente sans gain notable. Pas de valeur magique : mesure sur ton cas.</p></div>
 
   <h2>FORALL : écrire en masse</h2>
@@ -169,7 +169,10 @@ sequenceDiagram
        LOG ERRORS INTO err$_employes ('ch09') REJECT LIMIT UNLIMITED;   -- 3 lignes mises à jour
 
     SELECT ora_err_number$, emp_id FROM err$_employes ORDER BY emp_id;
-    ROLLBACK;
+    ROLLBACK;                                  -- annule l'UPDATE, pas les lignes de ERR$_EMPLOYES
+
+    DELETE FROM err$_employes;                 -- nettoyage explicite de la table d'erreurs
+    COMMIT;
   </script>
   <div class="output">2290 103
 2290 109</div>
@@ -217,21 +220,21 @@ sequenceDiagram
       <details class="sol"><summary>Voir la solution</summary>
         <script type="text/plsql" data-title="Solution PL/SQL">
           DECLARE
-            CURSOR c IS SELECT * FROM employes WHERE date_embauche < DATE '2020-01-01';
+            CURSOR cur_emps IS SELECT * FROM employes WHERE date_embauche < DATE '2020-01-01';
             TYPE t_emps IS TABLE OF employes%ROWTYPE;
             l_emps t_emps;
             l_lot  PLS_INTEGER := 0;
           BEGIN
-            OPEN c;
+            OPEN cur_emps;
             LOOP
-              FETCH c BULK COLLECT INTO l_emps LIMIT 2;
+              FETCH cur_emps BULK COLLECT INTO l_emps LIMIT 2;
               EXIT WHEN l_emps.COUNT = 0;
               l_lot := l_lot + 1;
               FORALL i IN 1 .. l_emps.COUNT
                 INSERT INTO employes_archive VALUES l_emps(i);   -- record entier, sans parenthèses
               DBMS_OUTPUT.PUT_LINE('Lot ' || l_lot || ' : ' || SQL%ROWCOUNT || ' ligne(s)');
             END LOOP;
-            CLOSE c;
+            CLOSE cur_emps;
             COMMIT;
           END;
           /
@@ -337,6 +340,12 @@ Lot 3 : 1 ligne(s)</div>
           /
         </script>
         <p class="hint">Résultat : 301, 303 et 304 insérés ; 2 lignes dans <code>journal_erreurs</code> (codes -1 et -2290, messages en 19c <code>id 102 : ORA-00001: unique constraint (.) violated</code> et <code>id 302 : ORA-02290: check constraint (.) violated</code>). On passe par la variable <code>l_msg</code> car <code>SQLERRM</code> ne peut pas être appelé directement dans un ordre SQL (<code>PLS-00231</code>). <code>SQL%BULK_EXCEPTIONS</code> décrit le dernier <code>FORALL</code> exécuté : les <code>INSERT</code> simples du journal ne l'effacent pas. Le bloc imbriqué permet de continuer vers le <code>COMMIT</code> après avoir traité <code>ORA-24381</code>.</p>
+        <script type="text/plsql" data-title="Nettoyage après l'exercice">
+          DELETE FROM employes WHERE emp_id IN (301, 303, 304);
+          DELETE FROM journal_erreurs WHERE programme = 'import';
+          COMMIT;
+        </script>
+        <p class="hint">Le <code>COMMIT</code> de la solution a rendu ces lignes permanentes : remets le schéma dans son état initial avant de passer au chapitre suivant (avec ce nettoyage, ou en relançant le script du <a href="#ch00">chapitre 00</a>), sinon les sorties des chapitres suivants ne correspondront plus.</p>
       </details>
     </div>
   </div>

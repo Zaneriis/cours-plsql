@@ -18,7 +18,7 @@ FLASH.push(
   { t: "NULL", q: "Différence entre <code>NVL</code> et <code>COALESCE</code> ?",
     a: "<p><code>NVL(a, b)</code> prend deux arguments et évalue toujours les deux. <code>COALESCE(a, b, c…)</code> accepte une liste, renvoie la première valeur non nulle et s'arrête dès qu'il la trouve. <code>COALESCE</code> est standard ANSI.</p>" },
   { t: "Types", q: "À quoi servent <code>%TYPE</code> et <code>%ROWTYPE</code> ?",
-    a: "<p>À ancrer une variable sur une colonne (<code>l_sal employes.salaire%TYPE</code>) ou un record sur une ligne de table ou de curseur (<code>l_emp employes%ROWTYPE</code>). Si la colonne change de taille ou de type, le code suit à la recompilation.</p>" },
+    a: "<p>À ancrer une variable sur une colonne (<code>l_sal employes.salaire%TYPE</code>) ou un record sur une ligne de table ou de curseur (<code>r_emp employes%ROWTYPE</code>). Si la colonne change de taille ou de type, le code suit à la recompilation.</p>" },
 
   /* ---------- Curseurs ---------- */
   { t: "Curseurs", q: "Quelles exceptions peut lever un <code>SELECT … INTO</code> ? Et <code>SELECT COUNT(*) INTO</code> ?",
@@ -48,13 +48,13 @@ FLASH.push(
 
   /* ---------- Procédures et fonctions ---------- */
   { t: "Sous-programmes", q: "Procédure ou fonction : comment choisir ? Que faut-il pour appeler une fonction depuis SQL ?",
-    a: "<p>Une fonction calcule et renvoie une valeur ; une procédure réalise une action. Appelée depuis SQL, une fonction ne doit avoir que des paramètres <code>IN</code> de types SQL, renvoyer un type SQL, et ne pas faire de DML ni de <code>COMMIT</code> (ORA-14551 depuis un <code>SELECT</code>).</p>" },
+    a: "<p>Une fonction calcule et renvoie une valeur ; une procédure réalise une action. Appelée depuis SQL, une fonction ne doit avoir que des paramètres <code>IN</code> de types SQL, renvoyer un type SQL, et ne faire ni DML (ORA-14551 depuis un <code>SELECT</code>) ni <code>COMMIT</code> (ORA-14552).</p>" },
   { t: "Sous-programmes", q: "Que deviennent les paramètres <code>OUT</code> si la procédure se termine par une exception ? Et avec <code>NOCOPY</code> ?",
     a: "<p>Ils sont passés par copie et recopiés seulement à la sortie normale : la variable de l'appelant garde son ancienne valeur. Avec <code>NOCOPY</code> (simple indication), le passage se fait par référence : plus rapide pour une grosse collection, mais les modifications partielles restent visibles.</p>" },
   { t: "Sous-programmes", q: "Différence entre <code>DETERMINISTIC</code> et <code>RESULT_CACHE</code> ?",
     a: "<p><code>DETERMINISTIC</code> est une promesse à l'optimiseur (mêmes entrées, même résultat), exigée pour un index sur fonction ; le bénéfice reste limité à la requête en cours. <code>RESULT_CACHE</code> (11g) stocke vraiment les résultats en mémoire partagée entre sessions, invalidés quand les tables sources changent.</p>" },
   { t: "Sous-programmes", q: "Pourquoi une requête qui marche dans SQL Developer échoue-t-elle dans ma procédure avec ORA-00942 ?",
-    a: "<p>Dans une unité <code>AUTHID DEFINER</code> (le défaut), les privilèges obtenus via un <strong>rôle</strong> sont ignorés. Il faut un <code>GRANT</code> direct à l'utilisateur propriétaire. Avec <code>AUTHID CURRENT_USER</code>, ce sont les droits de l'appelant qui s'appliquent.</p>" },
+    a: "<p>Dans une unité <code>AUTHID DEFINER</code> (le défaut), les privilèges obtenus via un <strong>rôle</strong> sont ignorés. Il faut un <code>GRANT</code> direct à l'utilisateur propriétaire. La compilation exige toujours un <code>GRANT</code> direct, quel que soit l'<code>AUTHID</code> ; en <code>CURRENT_USER</code>, les rôles de l'appelant ne jouent qu'à l'exécution.</p>" },
 
   /* ---------- Packages ---------- */
   { t: "Packages", q: "Pourquoi regrouper son code en packages ?",

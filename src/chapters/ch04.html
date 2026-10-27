@@ -46,7 +46,7 @@ Plusieurs employés dans le 20</div>
   <div class="callout tip"><span class="ct">Astuce : tester l'existence</span><p>Pour savoir si au moins une ligne existe, ne compte pas tout : <code>SELECT COUNT(*) INTO l_n FROM employes WHERE dept_id = p_dept AND ROWNUM = 1</code> renvoie 0 ou 1 et s'arrête à la première ligne trouvée. Souvent, le plus simple reste de tenter directement l'action (un <code>UPDATE</code> puis <code>SQL%ROWCOUNT</code>) plutôt que de vérifier avant d'agir.</p></div>
 
   <h2>DML et curseur implicite</h2>
-  <p class="prose">Après chaque <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>MERGE</code> ou <code>SELECT INTO</code>, les attributs du curseur implicite <code>SQL</code> décrivent le <strong>dernier</strong> ordre exécuté. Tant qu'aucun ordre SQL n'a été exécuté, ils valent <code>NULL</code>.</p>
+  <p class="prose">Après chaque <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>MERGE</code> ou <code>SELECT INTO</code>, les attributs du curseur implicite <code>SQL</code> décrivent le <strong>dernier</strong> ordre exécuté. Tant qu'aucun ordre SQL n'a été exécuté, ils valent <code>NULL</code> (sauf <code>SQL%ISOPEN</code>, toujours <code>FALSE</code>).</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Attribut</th><th>Signification</th></tr></thead>
     <tbody>
@@ -118,14 +118,14 @@ stateDiagram-v2
   <p class="prose">Grâce à la lecture cohérente d'Oracle, un curseur voit les données telles qu'elles étaient au moment de son <code>OPEN</code>, même si ta propre session les modifie ensuite.</p>
   <script type="text/plsql" data-title="Lecture cohérente d'un curseur">
     DECLARE
-      CURSOR c IS SELECT salaire FROM employes WHERE emp_id = 109;
+      CURSOR cur_sal IS SELECT salaire FROM employes WHERE emp_id = 109;
       l_sal employes.salaire%TYPE;
     BEGIN
-      OPEN c;                                              -- l'image des données est prise ici
+      OPEN cur_sal;                                        -- l'image des données est prise ici
       UPDATE employes SET salaire = 2000 WHERE emp_id = 109;
-      FETCH c INTO l_sal;
+      FETCH cur_sal INTO l_sal;
       DBMS_OUTPUT.PUT_LINE('Lu par le curseur : ' || l_sal);
-      CLOSE c;
+      CLOSE cur_sal;
       SELECT salaire INTO l_sal FROM employes WHERE emp_id = 109;
       DBMS_OUTPUT.PUT_LINE('Relu ensuite : ' || l_sal);
       ROLLBACK;
@@ -139,10 +139,10 @@ Relu ensuite : 2000</div>
   <p class="prose">Elle fait <code>OPEN</code>, <code>FETCH</code>, test de fin et <code>CLOSE</code> pour toi, et ferme le curseur même si une exception interrompt la boucle. Le record de boucle (<code>r</code>) est déclaré implicitement avec la forme de la requête. Depuis 10g, avec l'optimisation par défaut (<code>PLSQL_OPTIMIZE_LEVEL</code> à 2 ou plus), elle lit même les lignes par paquets de 100 en interne.</p>
   <script type="text/plsql" data-title="Boucle FOR, curseur déclaré ou en ligne">
     DECLARE
-      CURSOR c_dept (p_dept_id departements.dept_id%TYPE) IS   -- curseur paramétré
+      CURSOR cur_dept (p_dept_id departements.dept_id%TYPE) IS   -- curseur paramétré
         SELECT nom, salaire FROM employes WHERE dept_id = p_dept_id ORDER BY salaire DESC;
     BEGIN
-      FOR r IN c_dept(30) LOOP                -- r est un record implicite
+      FOR r IN cur_dept(30) LOOP                -- r est un record implicite
         DBMS_OUTPUT.PUT_LINE(r.nom || ' ' || r.salaire);
       END LOOP;
 
@@ -163,23 +163,23 @@ Informatique  5
 RH            0
 Ventes        4</div>
   <div class="callout tip"><span class="ct">Astuce</span><p>Dans un curseur, toute expression calculée doit avoir un <strong>alias</strong> (<code>COUNT(e.emp_id) nb</code>), sinon tu ne peux pas la lire depuis le record. Note aussi le <code>COUNT(e.emp_id)</code> et non <code>COUNT(*)</code> : avec la jointure externe, <code>COUNT(*)</code> compterait 1 pour le département RH.</p></div>
-  <div class="callout pitfall"><span class="ct">Piège</span><p>Après la boucle <code>FOR</code>, le curseur est déjà fermé : <code>c_dept%ROWCOUNT</code> lève alors <code>INVALID_CURSOR</code>. Si tu as besoin du nombre de lignes traitées, lis <code>c_dept%ROWCOUNT</code> <em>dans</em> la boucle ou incrémente un compteur. Le record <code>r</code> n'existe pas non plus hors de la boucle.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Après la boucle <code>FOR</code>, le curseur est déjà fermé : <code>cur_dept%ROWCOUNT</code> lève alors <code>INVALID_CURSOR</code>. Si tu as besoin du nombre de lignes traitées, lis <code>cur_dept%ROWCOUNT</code> <em>dans</em> la boucle ou incrémente un compteur. Le record <code>r</code> n'existe pas non plus hors de la boucle.</p></div>
 
   <h2>Verrouiller pour mettre à jour : FOR UPDATE</h2>
   <p class="prose"><code>FOR UPDATE</code> pose un verrou sur toutes les lignes sélectionnées dès l'<code>OPEN</code> (sauf avec <code>SKIP LOCKED</code>, voir plus bas), jusqu'au <code>COMMIT</code> ou <code>ROLLBACK</code>. Personne ne peut les modifier entre ta lecture et ta mise à jour : c'est la protection contre la <em>mise à jour perdue</em>. <code>WHERE CURRENT OF</code> met ensuite à jour la ligne courante via son ROWID, sans la rechercher.</p>
   <script type="text/plsql" data-title="FOR UPDATE … WHERE CURRENT OF">
     DECLARE
-      CURSOR c_com IS
+      CURSOR cur_com IS
         SELECT nom, salaire, commission
           FROM employes
          WHERE poste = 'COMMERCIAL'
          ORDER BY emp_id
            FOR UPDATE OF commission NOWAIT;   -- échoue tout de suite (ORA-00054) si déjà verrouillé
     BEGIN
-      FOR r IN c_com LOOP
+      FOR r IN cur_com LOOP
         UPDATE employes
            SET commission = NVL(r.commission, 0) + r.salaire * 0.05
-         WHERE CURRENT OF c_com;
+         WHERE CURRENT OF cur_com;
         DBMS_OUTPUT.PUT_LINE(r.nom || ' : ' || (NVL(r.commission, 0) + r.salaire * 0.05));
       END LOOP;
       ROLLBACK;            -- en production : COMMIT, qui libère les verrous
@@ -263,7 +263,7 @@ B traite Michel</div>
     </tbody>
   </table></div>
   <div class="callout pitfall"><span class="ct">Piège : fuite de curseurs</span><p>Une variable curseur renvoyée à l'appelant, ou un curseur déclaré dans un <em>package</em>, reste ouvert jusqu'à sa fermeture ou la fin de la session (un curseur explicite déclaré dans un bloc local est, lui, fermé automatiquement quand ce bloc se termine). À force : <code>ORA-01000: maximum open cursors exceeded</code>. Ferme toujours explicitement ce que tu ouvres, y compris dans le bloc <code>EXCEPTION</code> (<code>IF c%ISOPEN THEN CLOSE c; END IF;</code>), et vérifie que le code client ferme bien les curseurs qu'il reçoit.</p></div>
-  <div class="callout tip"><span class="ct">Pour aller plus loin</span><p>Une <em>expression de curseur</em> <code>CURSOR(SELECT …)</code> placée dans la liste d'un <code>SELECT</code> renvoie, pour chaque ligne, un curseur imbriqué : utile pour envoyer une structure maître-détail à un client en un seul appel. Depuis 12c, <code>DBMS_SQL.RETURN_RESULT</code> permet aussi à une procédure de renvoyer un résultat au client sans paramètre <code>OUT</code> (pratique pour les migrations depuis SQL Server).</p></div>
+  <div class="callout tip"><span class="ct">Astuce : pour aller plus loin</span><p>Une <em>expression de curseur</em> <code>CURSOR(SELECT …)</code> placée dans la liste d'un <code>SELECT</code> renvoie, pour chaque ligne, un curseur imbriqué : utile pour envoyer une structure maître-détail à un client en un seul appel. Depuis 12c, <code>DBMS_SQL.RETURN_RESULT</code> permet aussi à une procédure de renvoyer un résultat au client sans paramètre <code>OUT</code> (pratique pour les migrations depuis SQL Server).</p></div>
 
   <h2>MERGE : insérer ou mettre à jour en un ordre</h2>
   <script type="text/plsql" data-title="MERGE (« upsert »)">
@@ -334,20 +334,20 @@ B traite Michel</div>
       <details class="sol"><summary>Voir la solution</summary>
         <script type="text/plsql" data-title="Solution : version explicite">
           DECLARE
-            CURSOR c_org IS
+            CURSOR cur_org IS
               SELECT e.nom, m.nom AS manager
                 FROM employes e LEFT JOIN employes m ON m.emp_id = e.manager_id
                ORDER BY e.emp_id;
-            r c_org%ROWTYPE;          -- record ayant la forme du curseur
+            r cur_org%ROWTYPE;          -- record ayant la forme du curseur
           BEGIN
-            OPEN c_org;
+            OPEN cur_org;
             LOOP
-              FETCH c_org INTO r;
-              EXIT WHEN c_org%NOTFOUND;
+              FETCH cur_org INTO r;
+              EXIT WHEN cur_org%NOTFOUND;
               DBMS_OUTPUT.PUT_LINE(r.nom || ' → ' || NVL(r.manager, '(aucun)'));
             END LOOP;
-            DBMS_OUTPUT.PUT_LINE(c_org%ROWCOUNT || ' lignes');   -- AVANT le CLOSE
-            CLOSE c_org;
+            DBMS_OUTPUT.PUT_LINE(cur_org%ROWCOUNT || ' lignes');   -- AVANT le CLOSE
+            CLOSE cur_org;
           END;
           /
         </script>
@@ -372,7 +372,7 @@ Garcia → Petit
           END;
           /
         </script>
-        <p class="hint">Lire <code>c_org%ROWCOUNT</code> après <code>CLOSE</code> lève <code>INVALID_CURSOR</code>. La jointure externe est nécessaire, sinon la DG (sans manager) disparaît. L'alias <code>manager</code> est obligatoire : deux colonnes ne peuvent pas s'appeler <code>nom</code> dans le record.</p>
+        <p class="hint">Lire <code>cur_org%ROWCOUNT</code> après <code>CLOSE</code> lève <code>INVALID_CURSOR</code>. La jointure externe est nécessaire, sinon la DG (sans manager) disparaît. L'alias <code>manager</code> est obligatoire : deux colonnes ne peuvent pas s'appeler <code>nom</code> dans le record.</p>
       </details>
     </div>
   </div>
@@ -413,24 +413,24 @@ Garcia → Petit
       <p>Ce code affiche <code>Martin</code> deux fois alors que le département 10 n'a qu'un employé. Pourquoi ? Il y a aussi un risque de fuite de curseur : lequel ?</p>
       <script type="text/plsql" data-title="Code buggé">
         DECLARE
-          CURSOR c IS SELECT nom FROM employes WHERE dept_id = 10;
+          CURSOR cur_direction IS SELECT nom FROM employes WHERE dept_id = 10;
           l_nom employes.nom%TYPE;
         BEGIN
-          OPEN c;
+          OPEN cur_direction;
           LOOP
-            FETCH c INTO l_nom;
+            FETCH cur_direction INTO l_nom;
             DBMS_OUTPUT.PUT_LINE(l_nom);
-            EXIT WHEN c%NOTFOUND;
+            EXIT WHEN cur_direction%NOTFOUND;
           END LOOP;
-          CLOSE c;
+          CLOSE cur_direction;
         END;
         /
       </script>
       <div class="output">Martin
 Martin</div>
       <details class="sol"><summary>Voir la solution</summary>
-        <p>Le test de sortie est placé <strong>après</strong> l'affichage. Au deuxième tour, le <code>FETCH</code> ne trouve rien mais <code>l_nom</code> garde la valeur précédente, qui est réaffichée. Il faut <code>EXIT WHEN c%NOTFOUND;</code> juste après le <code>FETCH</code>.</p>
-        <p>Fuite : si une exception survient entre <code>OPEN</code> et <code>CLOSE</code>, le <code>CLOSE</code> n'est jamais exécuté. Ici le curseur est local, donc PL/SQL le fermera en sortant du bloc, mais la même structure sur un curseur de <em>package</em> ou une variable curseur le laisserait ouvert jusqu'à la fin de la session. Prends la bonne habitude : ajoute une section <code>EXCEPTION WHEN OTHERS THEN IF c%ISOPEN THEN CLOSE c; END IF; RAISE;</code> ou, plus simplement, utilise une boucle <code>FOR</code> qui ferme le curseur dans tous les cas.</p>
+        <p>Le test de sortie est placé <strong>après</strong> l'affichage. Au deuxième tour, le <code>FETCH</code> ne trouve rien mais <code>l_nom</code> garde la valeur précur_directionédente, qui est réaffichée. Il faut <code>EXIT WHEN cur_direction%NOTFOUND;</code> juste après le <code>FETCH</code>.</p>
+        <p>Fuite : si une exception survient entre <code>OPEN</code> et <code>CLOSE</code>, le <code>CLOSE</code> n'est jamais exécuté. Ici le curseur est local, donc PL/SQL le fermera en sortant du bloc, mais la même structure sur un curseur de <em>package</em> ou une variable curseur le laisserait ouvert jusqu'à la fin de la session. Prends la bonne habitude : ajoute une section <code>EXCEPTION WHEN OTHERS THEN IF cur_direction%ISOPEN THEN CLOSE cur_direction; END IF; RAISE;</code> ou, plus simplement, utilise une boucle <code>FOR</code> qui ferme le curseur dans tous les cas.</p>
       </details>
     </div>
   </div>
@@ -441,9 +441,9 @@ Martin</div>
       <details class="sol"><summary>Voir la solution</summary>
         <script type="text/plsql" data-title="Solution">
           DECLARE
-            CURSOR c_dept IS
+            CURSOR cur_dept IS
               SELECT dept_id, nom FROM departements ORDER BY dept_id;
-            CURSOR c_emp (p_dept_id departements.dept_id%TYPE) IS
+            CURSOR cur_emp (p_dept_id departements.dept_id%TYPE) IS
               SELECT nom, salaire
                 FROM employes
                WHERE dept_id = p_dept_id
@@ -451,11 +451,11 @@ Martin</div>
                ORDER BY salaire DESC;
             l_nb PLS_INTEGER;
           BEGIN
-            FOR d IN c_dept LOOP
+            FOR d IN cur_dept LOOP
               DBMS_OUTPUT.PUT_LINE(d.nom);
               l_nb := 0;
-              FOR e IN c_emp(d.dept_id) LOOP
-                l_nb := c_emp%ROWCOUNT;          -- lisible DANS la boucle seulement
+              FOR e IN cur_emp(d.dept_id) LOOP
+                l_nb := cur_emp%ROWCOUNT;          -- lisible DANS la boucle seulement
                 DBMS_OUTPUT.PUT_LINE('  ' || e.nom || ' ' || e.salaire);
               END LOOP;
               IF l_nb = 0 THEN

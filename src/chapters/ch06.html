@@ -126,11 +126,11 @@ flowchart LR
     <li>n'utiliser que des types SQL en paramètres et retour : pas de record PL/SQL, pas de tableau associatif, pas de <code>BOOLEAN</code> avant 23ai (où <code>BOOLEAN</code> devient un type SQL) ;</li>
     <li>n'avoir que des paramètres <code>IN</code> ;</li>
     <li>appelée depuis un <code>SELECT</code>, ne faire aucun DML (<code>ORA-14551: cannot perform a DML operation inside a query</code>) ;</li>
-    <li>appelée depuis un <code>SELECT</code> ou depuis un ordre DML, ne faire ni <code>COMMIT</code>, ni <code>ROLLBACK</code>, ni DDL (<code>ORA-14552: cannot perform a DDL, commit or rollback inside a query or DML</code>) ; ces deux interdits tombent si la fonction est en transaction autonome (<a href="#ch05">chapitre 05</a>) ;</li>
+    <li>appelée depuis un <code>SELECT</code> ou depuis un ordre DML, ne faire ni <code>COMMIT</code>, ni <code>ROLLBACK</code>, ni DDL (<code>ORA-14552: cannot perform a DDL, commit or rollback inside a query or DML</code>) ; ces deux interdits tombent si la fonction est en transaction autonome (<a href="#ch11">chapitre 11</a>) ;</li>
     <li>appelée depuis un <code>INSERT</code>, <code>UPDATE</code> ou <code>DELETE</code>, ne pas lire ni modifier la table que cet ordre modifie (table mutante <code>ORA-04091</code>, détaillée au <a href="#ch10">chapitre 10</a>).</li>
   </ul>
   <div class="callout pitfall"><span class="ct">Piège de performance</span><p>Dans la requête ci-dessus, <code>anciennete</code> est appelée pour chaque ligne dans le <code>WHERE</code>, puis de nouveau pour chaque ligne retenue dans le <code>SELECT</code>, et chaque appel exécute un <code>SELECT</code>. Chaque appel est un changement de contexte SQL → PL/SQL, et chaque requête interne un changement PL/SQL → SQL. Sur un million de lignes, c'est catastrophique : écris la logique en SQL pur (<code>TRUNC(MONTHS_BETWEEN(SYSDATE, date_embauche) / 12)</code>), ou fais recevoir à la fonction la date plutôt que l'identifiant.</p></div>
-  <div class="callout pitfall"><span class="ct">Piège : NO_DATA_FOUND avalé par SQL</span><p>Si une fonction appelée depuis une requête laisse échapper <code>NO_DATA_FOUND</code>, SQL ne lève pas d'erreur : la fonction renvoie simplement <code>NULL</code> pour cette ligne. <code>SELECT anciennete(999) FROM dual</code> affiche une valeur vide, alors que <code>l_x := anciennete(999)</code> en PL/SQL lève <code>ORA-01403</code>. Autre subtilité : la requête interne de la fonction prend sa propre image des données à chaque appel ; elle ne partage pas la lecture cohérente de la requête qui l'appelle.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège : NO_DATA_FOUND avalé par SQL</span><p>Comme vu au <a href="#ch05">chapitre 05</a>, un <code>NO_DATA_FOUND</code> qui s'échappe d'une fonction appelée en SQL donne <code>NULL</code> sans erreur : <code>SELECT anciennete(999) FROM dual</code> affiche une valeur vide. Autre subtilité : la requête interne de la fonction prend sa propre image des données à chaque appel ; elle ne partage pas la lecture cohérente de la requête qui l'appelle.</p></div>
   <p class="prose">Options pour accélérer une fonction appelée en SQL :</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Option</th><th>Effet</th></tr></thead>
@@ -226,30 +226,21 @@ Leroy.....  4800
   <p class="prose">Pour un vrai organigramme, une requête hiérarchique (<code>CONNECT BY</code> ou <code>WITH</code> récursif) fait le même travail en un seul ordre SQL, sans une requête par employé. La récursivité PL/SQL reste utile pour parcourir des structures en mémoire (collections, documents JSON).</p>
   <div class="callout tip"><span class="ct">Surcharge locale</span><p>Deux sous-programmes locaux du même bloc peuvent porter le même nom s'ils diffèrent par le nombre ou la famille de types de leurs paramètres, par exemple <code>formater(p_sal NUMBER)</code> et <code>formater(p_date DATE)</code>. C'est impossible pour des procédures autonomes du schéma (un seul objet par nom). Les règles de la surcharge sont détaillées avec les packages au <a href="#ch07">chapitre 07</a>.</p></div>
 
-  <h2>Dans le dictionnaire : état, arguments, recompilation</h2>
-  <p class="prose">Un sous-programme stocké est un objet du schéma, avec un statut <code>VALID</code> ou <code>INVALID</code>. Il devient <code>INVALID</code> quand un objet dont il dépend change d'une façon qui le concerne : depuis 11g, le suivi des dépendances est fin, et ajouter une colonne à <code>employes</code> n'invalide pas <code>augmenter_salaire</code>, alors que modifier le type de <code>salaire</code> l'invalide.</p>
-  <script type="text/plsql" data-title="Interroger le dictionnaire et recompiler">
-    -- Statut des objets
-    SELECT object_name, object_type, status
-      FROM user_objects
-     WHERE object_name IN ('AUGMENTER_SALAIRE', 'ANCIENNETE');
-
-    -- Signature : un argument par ligne ; pour une fonction, POSITION = 0 décrit le retour
+  <h2>Dans le dictionnaire : signature et recompilation</h2>
+  <p class="prose">Un sous-programme stocké est un objet du schéma, <code>VALID</code> ou <code>INVALID</code>, recompilé automatiquement au premier appel après une invalidation : ces mécanismes de dépendance sont détaillés au <a href="#ch01">chapitre 01</a>. Ce qui est propre aux procédures et fonctions, c'est la description de leur signature dans <code>USER_ARGUMENTS</code>.</p>
+  <script type="text/plsql" data-title="Signature, source et recompilation">
+    -- Un argument par ligne ; pour une fonction, POSITION = 0 décrit la valeur de retour
     SELECT argument_name, position, in_out, data_type, defaulted
       FROM user_arguments
      WHERE object_name = 'AUGMENTER_SALAIRE'
      ORDER BY position;
 
-    -- Code source et erreurs de compilation
-    SELECT line, text FROM user_source  WHERE name = 'ANCIENNETE' ORDER BY line;
-    SELECT line, position, text FROM user_errors WHERE name = 'ANCIENNETE';
-
-    -- Recompilation explicite
+    -- Code source, puis recompilation explicite
+    SELECT line, text FROM user_source WHERE name = 'ANCIENNETE' ORDER BY line;
     ALTER PROCEDURE augmenter_salaire COMPILE;
     ALTER FUNCTION anciennete COMPILE;
   </script>
-  <p class="prose">Pour <code>augmenter_salaire</code>, <code>USER_ARGUMENTS</code> renvoie trois lignes : <code>P_EMP_ID</code> (position 1, <code>IN</code>), <code>P_PCT</code> (position 2, <code>IN</code>, <code>DEFAULTED = 'Y'</code>) et <code>P_NOUVEAU</code> (position 3, <code>OUT</code>), toutes de type <code>NUMBER</code>. Les noms sont en majuscules dans le dictionnaire.</p>
-  <div class="callout interview"><span class="ct">En entretien : « Que se passe-t-il quand on appelle un objet INVALID ? »</span><p>Oracle tente de le recompiler automatiquement au moment de l'appel. Si la recompilation réussit, l'appel se déroule normalement (une seule fois plus lent). Si elle échoue, l'appel lève <code>ORA-06550</code> avec <code>PLS-00905: object … is invalid</code>. Après une livraison, on recompile tout le schéma d'un coup avec <code>DBMS_UTILITY.COMPILE_SCHEMA</code> ou <code>UTL_RECOMP</code> plutôt que d'attendre les premiers appels.</p></div>
+  <p class="prose">Pour <code>augmenter_salaire</code>, <code>USER_ARGUMENTS</code> renvoie trois lignes : <code>P_EMP_ID</code> (position 1, <code>IN</code>), <code>P_PCT</code> (position 2, <code>IN</code>, <code>DEFAULTED = 'Y'</code>) et <code>P_NOUVEAU</code> (position 3, <code>OUT</code>), toutes de type <code>NUMBER</code>. Les noms sont en majuscules dans le dictionnaire. Cette vue sert à vérifier la signature réellement compilée, par exemple avant de modifier les appels d'une procédure. Pour un sous-programme de package, il faut filtrer en plus sur <code>package_name</code>.</p>
 
   <h2>Droits d'exécution : DEFINER ou CURRENT_USER</h2>
   <div class="table-wrap"><table>

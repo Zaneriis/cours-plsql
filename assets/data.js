@@ -171,37 +171,37 @@ STEPPERS["cursor"] = {
   title: "Cycle de vie d'un curseur explicite",
   code: `
 DECLARE
-  CURSOR c_tech IS
+  CURSOR cur_tech IS
     SELECT nom, salaire FROM employes
      WHERE poste IN ('DEV', 'DBA') ORDER BY nom;
   l_nom employes.nom%TYPE;
   l_sal employes.salaire%TYPE;
 BEGIN
-  OPEN c_tech;
+  OPEN cur_tech;
   LOOP
-    FETCH c_tech INTO l_nom, l_sal;
-    EXIT WHEN c_tech%NOTFOUND;
-    DBMS_OUTPUT.PUT_LINE(c_tech%ROWCOUNT || '. ' || l_nom || ' ' || l_sal);
+    FETCH cur_tech INTO l_nom, l_sal;
+    EXIT WHEN cur_tech%NOTFOUND;
+    DBMS_OUTPUT.PUT_LINE(cur_tech%ROWCOUNT || '. ' || l_nom || ' ' || l_sal);
   END LOOP;
-  DBMS_OUTPUT.PUT_LINE('Lignes lues : ' || c_tech%ROWCOUNT);
-  CLOSE c_tech;
+  DBMS_OUTPUT.PUT_LINE('Lignes lues : ' || cur_tech%ROWCOUNT);
+  CLOSE cur_tech;
 END;`,
   table: { cols: ["nom", "salaire"], rows: [["Durand", "3900"], ["Leroy", "4800"], ["Petit", "4300"]], caption: "Jeu de résultats figé à l'OPEN (postes DEV et DBA, tri par nom)" },
   steps: [
-    { l: [2, 3, 4], n: "<strong>Déclaration</strong> : le curseur n'est qu'une requête nommée. Rien n'est exécuté, aucune ligne n'est lue.", v: { "c_tech%ISOPEN": "FALSE" } },
+    { l: [2, 3, 4], n: "<strong>Déclaration</strong> : le curseur n'est qu'une requête nommée. Rien n'est exécuté, aucune ligne n'est lue.", v: { "cur_tech%ISOPEN": "FALSE" } },
     { l: [5, 6], n: "Variables de réception, ancrées sur les colonnes avec <code>%TYPE</code>.", v: { l_nom: "NULL", l_sal: "NULL" } },
-    { l: 8, n: "<strong>OPEN</strong> : Oracle exécute la requête et fige l'image des données. Le pointeur est placé <em>avant</em> la première ligne. <code>%NOTFOUND</code> vaut NULL tant qu'aucun FETCH n'a eu lieu.", v: { "c_tech%ISOPEN": "TRUE", "c_tech%NOTFOUND": "NULL", "c_tech%ROWCOUNT": "0" } },
-    { l: 10, n: "<strong>FETCH</strong> : lit la ligne suivante, Durand, et avance le pointeur.", v: { l_nom: "Durand", l_sal: "3900", "c_tech%NOTFOUND": "FALSE", "c_tech%ROWCOUNT": "1" }, p: 0 },
+    { l: 8, n: "<strong>OPEN</strong> : Oracle exécute la requête et fige l'image des données. Le pointeur est placé <em>avant</em> la première ligne. <code>%NOTFOUND</code> vaut NULL tant qu'aucun FETCH n'a eu lieu.", v: { "cur_tech%ISOPEN": "TRUE", "cur_tech%NOTFOUND": "NULL", "cur_tech%ROWCOUNT": "0" } },
+    { l: 10, n: "<strong>FETCH</strong> : lit la ligne suivante, Durand, et avance le pointeur.", v: { l_nom: "Durand", l_sal: "3900", "cur_tech%NOTFOUND": "FALSE", "cur_tech%ROWCOUNT": "1" }, p: 0 },
     { l: 11, n: "<code>%NOTFOUND</code> vaut FALSE : on reste dans la boucle." },
     { l: 12, n: "Affichage, avec le rang de la ligne donné par <code>%ROWCOUNT</code>.", o: "1. Durand 3900" },
-    { l: 10, n: "Deuxième FETCH : Leroy.", v: { l_nom: "Leroy", l_sal: "4800", "c_tech%ROWCOUNT": "2" }, p: 1 },
+    { l: 10, n: "Deuxième FETCH : Leroy.", v: { l_nom: "Leroy", l_sal: "4800", "cur_tech%ROWCOUNT": "2" }, p: 1 },
     { l: [11, 12], n: "Toujours une ligne : on affiche.", o: "2. Leroy 4800" },
-    { l: 10, n: "Troisième FETCH : Petit.", v: { l_nom: "Petit", l_sal: "4300", "c_tech%ROWCOUNT": "3" }, p: 2 },
+    { l: 10, n: "Troisième FETCH : Petit.", v: { l_nom: "Petit", l_sal: "4300", "cur_tech%ROWCOUNT": "3" }, p: 2 },
     { l: [11, 12], n: "On affiche la dernière ligne.", o: "3. Petit 4300" },
-    { l: 10, n: "Quatrième FETCH : plus de ligne. <code>%NOTFOUND</code> passe à TRUE, <code>%ROWCOUNT</code> reste à 3, et <strong>les variables gardent leurs anciennes valeurs</strong> (Petit, 4300).", v: { "c_tech%NOTFOUND": "TRUE" }, p: null },
+    { l: 10, n: "Quatrième FETCH : plus de ligne. <code>%NOTFOUND</code> passe à TRUE, <code>%ROWCOUNT</code> reste à 3, et <strong>les variables gardent leurs anciennes valeurs</strong> (Petit, 4300).", v: { "cur_tech%NOTFOUND": "TRUE" }, p: null },
     { l: 11, n: "<strong>EXIT</strong> : placé juste après le FETCH, il évite de réafficher Petit une seconde fois." },
     { l: 14, n: "Le curseur est encore ouvert : <code>%ROWCOUNT</code> donne le nombre total de lignes lues.", o: "Lignes lues : 3" },
-    { l: 15, n: "<strong>CLOSE</strong> : libère la zone de travail. Désormais, lire <code>%NOTFOUND</code> ou <code>%ROWCOUNT</code> lèverait INVALID_CURSOR.", v: { "c_tech%ISOPEN": "FALSE", "c_tech%NOTFOUND": "(INVALID_CURSOR)", "c_tech%ROWCOUNT": "(INVALID_CURSOR)" } }
+    { l: 15, n: "<strong>CLOSE</strong> : libère la zone de travail. Désormais, lire <code>%NOTFOUND</code> ou <code>%ROWCOUNT</code> lèverait INVALID_CURSOR.", v: { "cur_tech%ISOPEN": "FALSE", "cur_tech%NOTFOUND": "(INVALID_CURSOR)", "cur_tech%ROWCOUNT": "(INVALID_CURSOR)" } }
   ]
 };
 
@@ -482,9 +482,9 @@ QUIZ.ch09 = [
     o: ["Parce que chaque UPDATE fait un COMMIT implicite", "Parce que chaque UPDATE provoque un changement de contexte entre les moteurs PL/SQL et SQL",
         "Parce que la boucle FOR lit les lignes une par une sans aucune optimisation", "Parce qu'Oracle verrouille toute la table à chaque tour"], a: 1,
     w: "Chaque ordre SQL lancé depuis PL/SQL est un aller-retour entre les deux moteurs. FORALL envoie tout le lot en un seul appel. La lecture de la boucle FOR, elle, est déjà faite par paquets de 100 depuis 10g." },
-  { q: "Un curseur renvoie 5 lignes. On fait <code>FETCH c BULK COLLECT INTO l_t LIMIT 2;</code> suivi immédiatement de <code>EXIT WHEN c%NOTFOUND;</code>, puis on traite le lot. Combien de lignes sont traitées ?",
+  { q: "Un curseur renvoie 5 lignes. On fait <code>FETCH cur_emps BULK COLLECT INTO l_t LIMIT 2;</code> suivi immédiatement de <code>EXIT WHEN cur_emps%NOTFOUND;</code>, puis on traite le lot. Combien de lignes sont traitées ?",
     o: ["5", "4", "2", "0"], a: 1,
-    w: "Le troisième FETCH ne ramène qu'une ligne (moins que LIMIT) : c%NOTFOUND est déjà TRUE et on sort sans traiter la 5e ligne. D'où EXIT WHEN l_t.COUNT = 0." },
+    w: "Le troisième FETCH ne ramène qu'une ligne (moins que LIMIT) : cur_emps%NOTFOUND est déjà TRUE et on sort sans traiter la 5e ligne. D'où EXIT WHEN l_t.COUNT = 0." },
   { q: "Que peut contenir un <code>FORALL</code> ?",
     o: ["Un bloc BEGIN … END avec plusieurs ordres", "Un seul ordre INSERT, UPDATE, DELETE ou MERGE",
         "Un ordre DML et un IF pour filtrer les lignes", "N'importe quelle instruction PL/SQL, répétée pour chaque indice"], a: 1,
@@ -505,19 +505,19 @@ STEPPERS["ch09-limit"] = {
   title: "BULK COLLECT … LIMIT 2 sur 5 lignes",
   code: `
 DECLARE
-  CURSOR c IS SELECT nom FROM employes
-               WHERE date_embauche < DATE '2020-01-01' ORDER BY emp_id;
+  CURSOR cur_emps IS SELECT nom FROM employes
+                      WHERE date_embauche < DATE '2020-01-01' ORDER BY emp_id;
   TYPE t_noms IS TABLE OF employes.nom%TYPE;
   l_noms t_noms;
 BEGIN
-  OPEN c;
+  OPEN cur_emps;
   LOOP
-    FETCH c BULK COLLECT INTO l_noms LIMIT 2;
+    FETCH cur_emps BULK COLLECT INTO l_noms LIMIT 2;
     EXIT WHEN l_noms.COUNT = 0;
     DBMS_OUTPUT.PUT_LINE(l_noms.COUNT || ' ligne(s), %NOTFOUND = '
-      || CASE WHEN c%NOTFOUND THEN 'TRUE' ELSE 'FALSE' END);
+      || CASE WHEN cur_emps%NOTFOUND THEN 'TRUE' ELSE 'FALSE' END);
   END LOOP;
-  CLOSE c;
+  CLOSE cur_emps;
 END;`,
   table: {
     cols: ["emp_id", "nom", "date_embauche"],
@@ -528,21 +528,21 @@ END;`,
   steps: [
     { l: [2, 3], n: "Le curseur sélectionne les employés embauchés avant 2020 : 5 lignes. La collection n'est pas initialisée : <code>BULK COLLECT</code> s'en chargera.",
       v: { "l_noms": "NULL (non initialisée)" } },
-    { l: 7, n: "<code>OPEN</code> exécute la requête. Avant le premier <code>FETCH</code>, <code>c%NOTFOUND</code> vaut NULL.",
-      v: { "c%ROWCOUNT": "0", "c%NOTFOUND": "NULL" } },
+    { l: 7, n: "<code>OPEN</code> exécute la requête. Avant le premier <code>FETCH</code>, <code>cur_emps%NOTFOUND</code> vaut NULL.",
+      v: { "cur_emps%ROWCOUNT": "0", "cur_emps%NOTFOUND": "NULL" } },
     { l: 9, n: "Lot 1 : le <code>FETCH</code> ramène 2 lignes, autant que <code>LIMIT</code>. Le curseur n'a pas encore vu la fin du jeu.",
-      v: { "l_noms": "(Martin, Bernard)", "l_noms.COUNT": "2", "c%ROWCOUNT": "2", "c%NOTFOUND": "FALSE" }, p: 1 },
+      v: { "l_noms": "(Martin, Bernard)", "l_noms.COUNT": "2", "cur_emps%ROWCOUNT": "2", "cur_emps%NOTFOUND": "FALSE" }, p: 1 },
     { l: 10, n: "<code>COUNT = 2</code> : on ne sort pas." },
     { l: [11, 12], n: "On traite le lot (ici, on affiche).", o: "2 ligne(s), %NOTFOUND = FALSE" },
-    { l: 9, n: "Lot 2 : la collection est <strong>vidée puis remplie</strong> avec les 2 lignes suivantes. Les lots ne s'accumulent pas. <code>c%ROWCOUNT</code>, lui, est cumulatif.",
-      v: { "l_noms": "(Petit, Leroy)", "l_noms.COUNT": "2", "c%ROWCOUNT": "4", "c%NOTFOUND": "FALSE" }, p: 3 },
+    { l: 9, n: "Lot 2 : la collection est <strong>vidée puis remplie</strong> avec les 2 lignes suivantes. Les lots ne s'accumulent pas. <code>cur_emps%ROWCOUNT</code>, lui, est cumulatif.",
+      v: { "l_noms": "(Petit, Leroy)", "l_noms.COUNT": "2", "cur_emps%ROWCOUNT": "4", "cur_emps%NOTFOUND": "FALSE" }, p: 3 },
     { l: [10, 11, 12], n: "<code>COUNT = 2</code> : on traite le lot.", o: "2 ligne(s), %NOTFOUND = FALSE" },
-    { l: 9, n: "Lot 3 : il ne reste qu'une ligne. Le <code>FETCH</code> en ramène 1, <strong>moins que LIMIT</strong> : le curseur a atteint la fin, <code>c%NOTFOUND</code> devient TRUE dès maintenant.",
-      v: { "l_noms": "(Moreau)", "l_noms.COUNT": "1", "c%ROWCOUNT": "5", "c%NOTFOUND": "TRUE" }, p: 4 },
-    { l: 10, n: "Le moment clé : <code>COUNT = 1</code>, on reste dans la boucle. Avec <code>EXIT WHEN c%NOTFOUND</code> à cet endroit, on sortirait ici et <strong>Moreau ne serait jamais traité</strong>." },
+    { l: 9, n: "Lot 3 : il ne reste qu'une ligne. Le <code>FETCH</code> en ramène 1, <strong>moins que LIMIT</strong> : le curseur a atteint la fin, <code>cur_emps%NOTFOUND</code> devient TRUE dès maintenant.",
+      v: { "l_noms": "(Moreau)", "l_noms.COUNT": "1", "cur_emps%ROWCOUNT": "5", "cur_emps%NOTFOUND": "TRUE" }, p: 4 },
+    { l: 10, n: "Le moment clé : <code>COUNT = 1</code>, on reste dans la boucle. Avec <code>EXIT WHEN cur_emps%NOTFOUND</code> à cet endroit, on sortirait ici et <strong>Moreau ne serait jamais traité</strong>." },
     { l: [11, 12], n: "Le dernier lot, incomplet, est bien traité.", o: "1 ligne(s), %NOTFOUND = TRUE" },
     { l: 9, n: "Lot 4 : plus rien à lire. Le <code>FETCH</code> ne lève pas d'erreur, il renvoie une collection vide.",
-      v: { "l_noms": "() vide", "l_noms.COUNT": "0", "c%ROWCOUNT": "5", "c%NOTFOUND": "TRUE" }, p: -1 },
+      v: { "l_noms": "() vide", "l_noms.COUNT": "0", "cur_emps%ROWCOUNT": "5", "cur_emps%NOTFOUND": "TRUE" }, p: -1 },
     { l: 10, n: "<code>COUNT = 0</code> : c'est le seul test qui dit « plus aucune ligne à traiter ». On sort de la boucle." },
     { l: 14, n: "Fermeture du curseur. Bilan : 4 <code>FETCH</code>, 3 lots traités (2, 2, 1), aucune ligne perdue." }
   ]
@@ -724,7 +724,7 @@ FLASH.push(
   { t: "NULL", q: "Différence entre <code>NVL</code> et <code>COALESCE</code> ?",
     a: "<p><code>NVL(a, b)</code> prend deux arguments et évalue toujours les deux. <code>COALESCE(a, b, c…)</code> accepte une liste, renvoie la première valeur non nulle et s'arrête dès qu'il la trouve. <code>COALESCE</code> est standard ANSI.</p>" },
   { t: "Types", q: "À quoi servent <code>%TYPE</code> et <code>%ROWTYPE</code> ?",
-    a: "<p>À ancrer une variable sur une colonne (<code>l_sal employes.salaire%TYPE</code>) ou un record sur une ligne de table ou de curseur (<code>l_emp employes%ROWTYPE</code>). Si la colonne change de taille ou de type, le code suit à la recompilation.</p>" },
+    a: "<p>À ancrer une variable sur une colonne (<code>l_sal employes.salaire%TYPE</code>) ou un record sur une ligne de table ou de curseur (<code>r_emp employes%ROWTYPE</code>). Si la colonne change de taille ou de type, le code suit à la recompilation.</p>" },
 
   /* ---------- Curseurs ---------- */
   { t: "Curseurs", q: "Quelles exceptions peut lever un <code>SELECT … INTO</code> ? Et <code>SELECT COUNT(*) INTO</code> ?",
@@ -754,13 +754,13 @@ FLASH.push(
 
   /* ---------- Procédures et fonctions ---------- */
   { t: "Sous-programmes", q: "Procédure ou fonction : comment choisir ? Que faut-il pour appeler une fonction depuis SQL ?",
-    a: "<p>Une fonction calcule et renvoie une valeur ; une procédure réalise une action. Appelée depuis SQL, une fonction ne doit avoir que des paramètres <code>IN</code> de types SQL, renvoyer un type SQL, et ne pas faire de DML ni de <code>COMMIT</code> (ORA-14551 depuis un <code>SELECT</code>).</p>" },
+    a: "<p>Une fonction calcule et renvoie une valeur ; une procédure réalise une action. Appelée depuis SQL, une fonction ne doit avoir que des paramètres <code>IN</code> de types SQL, renvoyer un type SQL, et ne faire ni DML (ORA-14551 depuis un <code>SELECT</code>) ni <code>COMMIT</code> (ORA-14552).</p>" },
   { t: "Sous-programmes", q: "Que deviennent les paramètres <code>OUT</code> si la procédure se termine par une exception ? Et avec <code>NOCOPY</code> ?",
     a: "<p>Ils sont passés par copie et recopiés seulement à la sortie normale : la variable de l'appelant garde son ancienne valeur. Avec <code>NOCOPY</code> (simple indication), le passage se fait par référence : plus rapide pour une grosse collection, mais les modifications partielles restent visibles.</p>" },
   { t: "Sous-programmes", q: "Différence entre <code>DETERMINISTIC</code> et <code>RESULT_CACHE</code> ?",
     a: "<p><code>DETERMINISTIC</code> est une promesse à l'optimiseur (mêmes entrées, même résultat), exigée pour un index sur fonction ; le bénéfice reste limité à la requête en cours. <code>RESULT_CACHE</code> (11g) stocke vraiment les résultats en mémoire partagée entre sessions, invalidés quand les tables sources changent.</p>" },
   { t: "Sous-programmes", q: "Pourquoi une requête qui marche dans SQL Developer échoue-t-elle dans ma procédure avec ORA-00942 ?",
-    a: "<p>Dans une unité <code>AUTHID DEFINER</code> (le défaut), les privilèges obtenus via un <strong>rôle</strong> sont ignorés. Il faut un <code>GRANT</code> direct à l'utilisateur propriétaire. Avec <code>AUTHID CURRENT_USER</code>, ce sont les droits de l'appelant qui s'appliquent.</p>" },
+    a: "<p>Dans une unité <code>AUTHID DEFINER</code> (le défaut), les privilèges obtenus via un <strong>rôle</strong> sont ignorés. Il faut un <code>GRANT</code> direct à l'utilisateur propriétaire. La compilation exige toujours un <code>GRANT</code> direct, quel que soit l'<code>AUTHID</code> ; en <code>CURRENT_USER</code>, les rôles de l'appelant ne jouent qu'à l'exécution.</p>" },
 
   /* ---------- Packages ---------- */
   { t: "Packages", q: "Pourquoi regrouper son code en packages ?",

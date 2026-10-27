@@ -200,12 +200,12 @@
       <tr><td><code>COUNT(*)</code> après un <code>LEFT JOIN</code></td><td>Compte la ligne vide : <code>COUNT(colonne)</code></td><td>SQL 6</td></tr>
       <tr><td><code>SELECT COUNT(*) INTO</code> sans ligne</td><td>Pas d'exception, renvoie 0</td><td><a href="#ch04">04</a></td></tr>
       <tr><td><code>UPDATE</code> qui ne touche aucune ligne</td><td>Pas d'exception, <code>SQL%ROWCOUNT = 0</code></td><td><a href="#ch04">04</a></td></tr>
-      <tr><td><code>EXIT WHEN %NOTFOUND</code> en fin de boucle</td><td>Dernière ligne traitée deux fois</td><td><a href="#ch04">04</a></td></tr>
+      <tr><td><code>EXIT WHEN %NOTFOUND</code> en fin de boucle</td><td>Avec un <code>FETCH</code> ligne à ligne : dernière ligne traitée deux fois</td><td><a href="#ch04">04</a></td></tr>
       <tr><td>Exception dans la section <code>DECLARE</code></td><td>Non traitée par le même bloc, remonte</td><td><a href="#ch05">05</a></td></tr>
       <tr><td><code>WHEN OTHERS THEN NULL</code></td><td>Anti-pattern : journaliser et re-lever</td><td><a href="#ch05">05</a></td></tr>
       <tr><td>Paramètre <code>OUT</code> après une exception</td><td>Non recopié (sauf <code>NOCOPY</code>)</td><td><a href="#ch06">06</a></td></tr>
       <tr><td>Fonction avec DML appelée dans un <code>SELECT</code></td><td>ORA-14551, sauf transaction autonome</td><td><a href="#ch06">06</a></td></tr>
-      <tr><td>Privilège via un rôle dans une procédure</td><td>Ignoré en <code>AUTHID DEFINER</code> : grant direct</td><td><a href="#ch06">06</a></td></tr>
+      <tr><td>Privilège via un rôle dans une procédure</td><td>Ignoré à la compilation (et à l'exécution en <code>DEFINER</code>) : grant direct</td><td><a href="#ch06">06</a></td></tr>
       <tr><td>Variable de package et pool de connexions</td><td>L'état persiste entre utilisateurs de la même session</td><td><a href="#ch07">07</a></td></tr>
       <tr><td><code>BULK COLLECT LIMIT</code> + <code>EXIT WHEN %NOTFOUND</code> juste après le <code>FETCH</code></td><td>Le dernier lot incomplet est perdu</td><td><a href="#ch09">09</a></td></tr>
       <tr><td><code>FORALL</code> sur une collection creuse</td><td>ORA-22160 avec <code>1 .. COUNT</code> : <code>INDICES OF</code></td><td><a href="#ch09">09</a></td></tr>
@@ -225,22 +225,22 @@
       <p>Cette procédure doit ajouter à la commission de chaque employé d'un département une prime de 10 % de son salaire, puis afficher le nom du département. Appelée avec 30, elle n'affiche rien et ne modifie rien. Explique pourquoi, liste tous les défauts (il y en a au moins six) et propose une version corrigée.</p>
       <script type="text/plsql" data-title="Code à relire">
         CREATE OR REPLACE PROCEDURE prime_fin_annee (dept_id IN NUMBER) IS
-          CURSOR c_emp IS
+          CURSOR cur_emp IS
             SELECT emp_id, salaire, commission FROM employes WHERE dept_id = dept_id;
-          l_emp      c_emp%ROWTYPE;
+          l_emp      cur_emp%ROWTYPE;
           l_prime    NUMBER;
           l_nom_dept departements.nom%TYPE;
         BEGIN
           SELECT nom INTO l_nom_dept FROM departements WHERE dept_id = dept_id;
-          OPEN c_emp;
+          OPEN cur_emp;
           LOOP
-            FETCH c_emp INTO l_emp;
+            FETCH cur_emp INTO l_emp;
             l_prime := l_emp.salaire * 0.1 + l_emp.commission;
             UPDATE employes SET commission = l_prime WHERE emp_id = l_emp.emp_id;
             COMMIT;
-            EXIT WHEN c_emp%NOTFOUND;
+            EXIT WHEN cur_emp%NOTFOUND;
           END LOOP;
-          CLOSE c_emp;
+          CLOSE cur_emp;
           DBMS_OUTPUT.PUT_LINE('Primes versées : ' || l_nom_dept);
         EXCEPTION
           WHEN OTHERS THEN NULL;
@@ -271,14 +271,14 @@
             DBMS_OUTPUT.PUT_LINE(SQL%ROWCOUNT || ' prime(s) versée(s) : ' || l_nom_dept);
           EXCEPTION
             WHEN NO_DATA_FOUND THEN
-              RAISE_APPLICATION_ERROR(-20010, 'Département ' || p_dept_id || ' inexistant');
+              RAISE_APPLICATION_ERROR(-20011, 'Département ' || p_dept_id || ' inexistant');
           END prime_fin_annee;
           /
           EXEC prime_fin_annee(30)
           ROLLBACK;
         </script>
         <div class="output">4 prime(s) versée(s) : Ventes</div>
-        <p class="hint">Pas de <code>COMMIT</code> : l'appelant valide. Avec 40, la procédure affiche <code>0 prime(s) versée(s) : RH</code> ; avec 99, elle lève ORA-20010.</p>
+        <p class="hint">Pas de <code>COMMIT</code> : l'appelant valide. Avec 40, la procédure affiche <code>0 prime(s) versée(s) : RH</code> ; avec 99, elle lève ORA-20011.</p>
       </details>
     </div>
   </div>
@@ -333,7 +333,7 @@
               -- 5 ans ou plus au 31/12/p_annee  <=>  embauché avant le 01/01/(p_annee - 4)
               l_limite CONSTANT DATE := TO_DATE((p_annee - 4) || '-01-01', 'YYYY-MM-DD');
 
-              CURSOR c_cibles IS
+              CURSOR cur_cibles IS
                 SELECT emp_id,
                        salaire AS ancien,
                        LEAST(c_plafond,
@@ -354,9 +354,9 @@
               l_ko t_ko;
             BEGIN
               p_nb_ok := 0; p_nb_ko := 0;
-              OPEN c_cibles;
+              OPEN cur_cibles;
               LOOP
-                FETCH c_cibles BULK COLLECT INTO l_ids, l_anc, l_nouv LIMIT 1000;
+                FETCH cur_cibles BULK COLLECT INTO l_ids, l_anc, l_nouv LIMIT 1000;
                 EXIT WHEN l_ids.COUNT = 0;
                 l_ko.DELETE;
 
@@ -387,10 +387,10 @@
                   INSERT INTO historique_salaires (emp_id, ancien_salaire, nouveau_salaire)
                   VALUES (l_ids(i), l_anc(i), l_nouv(i));
               END LOOP;
-              CLOSE c_cibles;
+              CLOSE cur_cibles;
             EXCEPTION
               WHEN OTHERS THEN
-                IF c_cibles%ISOPEN THEN CLOSE c_cibles; END IF;
+                IF cur_cibles%ISOPEN THEN CLOSE cur_cibles; END IF;
                 RAISE;
             END appliquer;
 
@@ -433,7 +433,7 @@
           <li><code>SAVE EXCEPTIONS</code> isole les lignes en erreur. <code>ERROR_INDEX</code> est la position dans le <code>FORALL</code> : comme il parcourt <code>1 .. COUNT</code>, c'est aussi l'indice dans <code>l_ids</code>. <code>ERROR_CODE</code> est positif, d'où le <code>-p_code</code> pour <code>SQLERRM</code>.</li>
           <li><code>INDICES OF l_ids</code> parce que <code>l_ids</code> devient creuse ; <code>FORALL i IN 1 .. l_ids.COUNT</code> lèverait ORA-22160. <code>l_anc</code> et <code>l_nouv</code> restent denses : on les lit avec les indices encore présents dans <code>l_ids</code>, qui correspondent toujours à la même ligne. Le <code>FETCH</code> suivant réinitialise les trois collections.</li>
           <li>Le journal est en transaction autonome : son <code>COMMIT</code> ne valide que le journal, qui survit à un éventuel <code>ROLLBACK</code> de l'appelant. <code>SQLERRM</code> ne peut pas être appelé dans un ordre SQL : on passe par une variable.</li>
-          <li><strong>Interactions avec le chapitre 10</strong> : si le trigger <code>trg_employes_audit_sal</code> existe, l'insertion dans l'historique ferait doublon ; il faut choisir l'un ou l'autre. Si <code>trg_sal_plafond</code> rejette une ligne, elle arrive dans <code>SQL%BULK_EXCEPTIONS</code> avec <code>ERROR_CODE</code> = 20300. Seul le code est conservé : le texte passé à <code>RAISE_APPLICATION_ERROR</code> (« Salaire hors plafond… ») est perdu, et <code>SQLERRM(-20300)</code> ne renvoie qu'un message générique pour ce numéro. Pour garder le texte complet, la clause <code>LOG ERRORS</code> l'enregistre, elle.</li>
+          <li><strong>Interactions avec le <a href="#ch10">chapitre 10</a></strong> : si le trigger <code>trg_employes_audit_sal</code> existe, l'insertion dans l'historique ferait doublon ; il faut choisir l'un ou l'autre. Si <code>trg_sal_plafond</code> rejette une ligne, elle arrive dans <code>SQL%BULK_EXCEPTIONS</code> avec <code>ERROR_CODE</code> = 20300. Seul le code est conservé : le texte passé à <code>RAISE_APPLICATION_ERROR</code> (« Salaire hors plafond… ») est perdu, et <code>SQLERRM(-20300)</code> ne renvoie qu'un message générique pour ce numéro. Pour garder le texte complet, la clause <code>LOG ERRORS</code> l'enregistre, elle.</li>
           <li><strong>Limites assumées</strong> : si une autre session supprime (et valide) un employé entre la lecture et l'<code>UPDATE</code>, celui-ci ne touche aucune ligne, sans erreur, puis l'insertion dans l'historique échoue sur la clé étrangère (ORA-02291) et fait échouer tout l'appel : il faudrait tester <code>SQL%BULK_ROWCOUNT(i)</code> avant de tracer ; pour se protéger des modifications concurrentes, on ajouterait <code>FOR UPDATE</code> au curseur, au prix d'un verrou sur toutes les lignes ciblées.</li>
           <li><strong>Alternative SQL pur</strong>, sans gestion fine des erreurs : un <code>INSERT … SELECT</code> dans l'historique puis un seul <code>UPDATE</code> avec la même expression, ou un <code>UPDATE</code> avec la clause <code>LOG ERRORS INTO</code> (table créée par <code>DBMS_ERRLOG.CREATE_ERROR_LOG</code>), qui joue en SQL un rôle proche de <code>SAVE EXCEPTIONS</code>. Sur un million de lignes, c'est souvent la solution la plus rapide : dis-le.</li>
         </ul>

@@ -103,7 +103,7 @@ flowchart TD
       <li><code>PLS_INTEGER</code> pour les compteurs, statistiques à jour sur les tables chargées par un batch.</li>
     </ul>
   </div>
-  <div class="callout pitfall"><span class="ct">Piège : COMMIT dans une boucle de curseur</span><p>Valider à chaque ligne ralentit le traitement, rend impossible l'annulation de l'ensemble en cas d'erreur (la moitié des lignes est déjà validée et le traitement ne sait pas où reprendre) et, si le curseur parcourt une table modifiée et validée en même temps, expose à <code>ORA-01555: snapshot too old</code> sur un long parcours. Si un lot doit vraiment être découpé, il faut un traitement <strong>reprenable</strong> (table de suivi des lignes traitées).</p></div>
+  <p class="prose">Les dangers d'un <code>COMMIT</code> dans une boucle sont détaillés au <a href="#ch11">chapitre 11</a>. Si un très gros lot doit vraiment être validé par tranches, rends le traitement <strong>reprenable</strong> : une table de suivi des lignes déjà traitées permet de relancer après une erreur sans tout refaire ni traiter deux fois.</p>
 
   <h2>Conventions de code</h2>
   <div class="table-wrap"><table>

@@ -254,8 +254,31 @@ ORA-06512: at line 1</div>
       </details>
     </div>
   </div>
+  <div class="ex" data-ex="ch07-e4">
+    <div class="ex-head"><h4>Exercice 3 · Surcharger jours_ouvres</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Ajoute à <code>pkg_dates</code> une seconde version de <code>jours_ouvres</code> qui accepte deux chaînes au format <code>c_format</code>, de sorte que <code>pkg_dates.jours_ouvres('26/10/2026', '08/11/2026')</code> renvoie aussi 10. Ne duplique pas la logique de calcul. Pourquoi cette surcharge est-elle autorisée ?</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Ajout dans la spécification">
+          FUNCTION jours_ouvres (p_debut IN VARCHAR2, p_fin IN VARCHAR2) RETURN PLS_INTEGER;
+        </script>
+        <script type="text/plsql" data-title="Ajout dans le corps (après la version DATE)">
+          FUNCTION jours_ouvres (p_debut IN VARCHAR2, p_fin IN VARCHAR2) RETURN PLS_INTEGER IS
+          BEGIN
+            -- TO_DATE renvoie un DATE : c'est la version DATE qui est appelée ici
+            RETURN jours_ouvres(TO_DATE(p_debut, c_format), TO_DATE(p_fin, c_format));
+          END jours_ouvres;
+        </script>
+        <script type="text/plsql" data-title="Test">
+          SELECT pkg_dates.jours_ouvres('26/10/2026', '08/11/2026') FROM dual;              -- 10
+          SELECT pkg_dates.jours_ouvres(DATE '2026-10-26', DATE '2026-11-08') FROM dual;  -- 10
+        </script>
+        <p class="hint">Les deux versions ont le même nombre de paramètres, mais <code>VARCHAR2</code> et <code>DATE</code> appartiennent à des familles de types différentes : Oracle choisit la version d'après le type des arguments. Avec une chaîne qui ne respecte pas le format, <code>TO_DATE</code> lève une erreur (par exemple <code>ORA-01843</code> pour un mois invalide) : c'est voulu, une date mal formée ne doit pas donner un résultat silencieux.</p>
+      </details>
+    </div>
+  </div>
   <div class="ex" data-ex="ch07-e3">
-    <div class="ex-head"><h4>Exercice 3 · Cache de session</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-head"><h4>Exercice 4 · Cache de session</h4><span class="lvl l3">difficile</span></div>
     <div class="ex-body">
       <p>Crée <code>pkg_cache_dept</code> avec une fonction <code>nom(p_dept_id)</code> qui lit le nom du département en base au premier appel, puis le garde en mémoire (tableau associatif privé) pour les appels suivants de la session. Ajoute une procédure <code>vider</code>. Quel est le risque de ce cache comparé à <code>RESULT_CACHE</code> ?</p>
       <details class="sol"><summary>Voir la solution</summary>
@@ -291,31 +314,6 @@ ORA-06512: at line 1</div>
       </details>
     </div>
   </div>
-
-  <div class="ex" data-ex="ch07-e4">
-    <div class="ex-head"><h4>Exercice 4 · Surcharger jours_ouvres</h4><span class="lvl l2">moyen</span></div>
-    <div class="ex-body">
-      <p>Ajoute à <code>pkg_dates</code> une seconde version de <code>jours_ouvres</code> qui accepte deux chaînes au format <code>c_format</code>, de sorte que <code>pkg_dates.jours_ouvres('26/10/2026', '08/11/2026')</code> renvoie aussi 10. Ne duplique pas la logique de calcul. Pourquoi cette surcharge est-elle autorisée ?</p>
-      <details class="sol"><summary>Voir la solution</summary>
-        <script type="text/plsql" data-title="Ajout dans la spécification">
-          FUNCTION jours_ouvres (p_debut IN VARCHAR2, p_fin IN VARCHAR2) RETURN PLS_INTEGER;
-        </script>
-        <script type="text/plsql" data-title="Ajout dans le corps (après la version DATE)">
-          FUNCTION jours_ouvres (p_debut IN VARCHAR2, p_fin IN VARCHAR2) RETURN PLS_INTEGER IS
-          BEGIN
-            -- TO_DATE renvoie un DATE : c'est la version DATE qui est appelée ici
-            RETURN jours_ouvres(TO_DATE(p_debut, c_format), TO_DATE(p_fin, c_format));
-          END jours_ouvres;
-        </script>
-        <script type="text/plsql" data-title="Test">
-          SELECT pkg_dates.jours_ouvres('26/10/2026', '08/11/2026') FROM dual;              -- 10
-          SELECT pkg_dates.jours_ouvres(DATE '2026-10-26', DATE '2026-11-08') FROM dual;  -- 10
-        </script>
-        <p class="hint">Les deux versions ont le même nombre de paramètres, mais <code>VARCHAR2</code> et <code>DATE</code> appartiennent à des familles de types différentes : Oracle choisit la version d'après le type des arguments. Avec une chaîne qui ne respecte pas le format, <code>TO_DATE</code> lève une erreur (par exemple <code>ORA-01843</code> pour un mois invalide) : c'est voulu, une date mal formée ne doit pas donner un résultat silencieux.</p>
-      </details>
-    </div>
-  </div>
-
   <h2>Quiz</h2>
   <div data-quiz="ch07"></div>
 

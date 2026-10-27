@@ -289,8 +289,32 @@ flowchart LR
       </details>
     </div>
   </div>
+  <div class="ex" data-ex="ch01-e3">
+    <div class="ex-head"><h4>Exercice 2 · Corriger la compilation</h4><span class="lvl l1">facile</span></div>
+    <div class="ex-body">
+      <p>Ce bloc contient trois erreurs. Trouve-les.</p>
+      <script type="text/plsql" data-title="Bloc buggé">
+        DECLARE
+          l_total NUMBER
+          c_max   CONSTANT NUMBER;
+        BEGIN
+          l_total = 10;
+          DBMS_OUTPUT.PUT_LINE(l_total);
+        END;
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <ol>
+          <li>Point-virgule manquant après <code>l_total NUMBER</code>.</li>
+          <li>Une <code>CONSTANT</code> doit être initialisée : <code>c_max CONSTANT NUMBER := 100;</code></li>
+          <li>L'affectation s'écrit <code>:=</code>, pas <code>=</code> (qui est l'opérateur de comparaison).</li>
+        </ol>
+        <p>Ce sont trois erreurs de compilation (<code>PLS-</code>) : aucune ligne du bloc ne s'exécute tant qu'elles ne sont pas toutes corrigées. Le compilateur s'arrête souvent sur la première erreur de syntaxe, d'où l'intérêt de corriger et recompiler par étapes.</p>
+        <p class="hint">Bonus : sans <code>/</code> final, le bloc n'est pas envoyé en mode script.</p>
+      </details>
+    </div>
+  </div>
   <div class="ex" data-ex="ch01-e2">
-    <div class="ex-head"><h4>Exercice 2 · Prédire la sortie</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-head"><h4>Exercice 3 · Prédire la sortie</h4><span class="lvl l2">moyen</span></div>
     <div class="ex-body">
       <p>Sans l'exécuter, qu'affiche ce bloc ? Vérifie ensuite.</p>
       <script type="text/plsql" data-title="À prédire">
@@ -314,30 +338,6 @@ flowchart LR
         <div class="output" style="margin:8px 0">A=20 B=3
 C=3</div>
         <p><code>b1.v := b1.v + v</code> modifie la variable <em>externe</em> (1 + 2 = 3). <code>v := v * 10</code> modifie la variable <em>interne</em> (20). Après le sous-bloc, seule la variable externe existe : elle vaut 3.</p>
-      </details>
-    </div>
-  </div>
-  <div class="ex" data-ex="ch01-e3">
-    <div class="ex-head"><h4>Exercice 3 · Corriger la compilation</h4><span class="lvl l1">facile</span></div>
-    <div class="ex-body">
-      <p>Ce bloc contient trois erreurs. Trouve-les.</p>
-      <script type="text/plsql" data-title="Bloc buggé">
-        DECLARE
-          l_total NUMBER
-          c_max   CONSTANT NUMBER;
-        BEGIN
-          l_total = 10;
-          DBMS_OUTPUT.PUT_LINE(l_total);
-        END;
-      </script>
-      <details class="sol"><summary>Voir la solution</summary>
-        <ol>
-          <li>Point-virgule manquant après <code>l_total NUMBER</code>.</li>
-          <li>Une <code>CONSTANT</code> doit être initialisée : <code>c_max CONSTANT NUMBER := 100;</code></li>
-          <li>L'affectation s'écrit <code>:=</code>, pas <code>=</code> (qui est l'opérateur de comparaison).</li>
-        </ol>
-        <p>Ce sont trois erreurs de compilation (<code>PLS-</code>) : aucune ligne du bloc ne s'exécute tant qu'elles ne sont pas toutes corrigées. Le compilateur s'arrête souvent sur la première erreur de syntaxe, d'où l'intérêt de corriger et recompiler par étapes.</p>
-        <p class="hint">Bonus : sans <code>/</code> final, le bloc n'est pas envoyé en mode script.</p>
       </details>
     </div>
   </div>

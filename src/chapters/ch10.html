@@ -187,7 +187,7 @@ ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
 
   <h2>Bonnes pratiques</h2>
   <ul class="prose">
-    <li><strong>Pas de <code>COMMIT</code></strong> ni <code>ROLLBACK</code> dans un trigger (<code>ORA-04092</code>), sauf transaction autonome réservée au log (voir <a href="#ch05">chapitre 05</a>).</li>
+    <li><strong>Pas de <code>COMMIT</code></strong> ni <code>ROLLBACK</code> dans un trigger (<code>ORA-04092</code>), sauf transaction autonome réservée au log (voir <a href="#ch11">chapitre 11</a>).</li>
     <li>Si un trigger lève une exception, <strong>tout l'ordre DML</strong> est annulé, y compris le travail déjà fait par les autres triggers (rollback au niveau instruction). La transaction, elle, continue : les ordres précédents ne sont pas annulés.</li>
     <li>Garde les triggers <strong>courts</strong> : appelle une procédure de package plutôt que d'écrire 200 lignes dedans.</li>
     <li>Préfère une <strong>contrainte</strong> (<code>CHECK</code>, <code>FOREIGN KEY</code>, <code>UNIQUE</code>) à un trigger quand elle suffit : plus rapide, plus fiable, visible.</li>
@@ -235,56 +235,16 @@ ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
             END IF;
           END;
           /
+          ROLLBACK;                           -- annule tes essais (le DDL suivant validerait)
+          DROP TRIGGER trg_employes_regles;   -- après tes essais
         </script>
+        <p class="hint">Ce trigger est un exercice : après l'essai, fais <code>ROLLBACK</code> puis <code>DROP TRIGGER trg_employes_regles;</code>, sinon il refusera les baisses de salaire des chapitres suivants (ORA-20301).</p>
         <p class="hint">Avec un pool de connexions applicatif, <code>USER</code> est souvent le compte technique de l'application ; on utilise alors <code>SYS_CONTEXT('USERENV', 'CLIENT_IDENTIFIER')</code> positionné par l'application.</p>
       </details>
     </div>
   </div>
-  <div class="ex" data-ex="ch10-e3">
-    <div class="ex-head"><h4>Exercice 3 · Cinq employés au plus par département</h4><span class="lvl l3">difficile</span></div>
-    <div class="ex-body">
-      <p>Règle : un département ne peut pas avoir plus de 5 employés. Un trigger de ligne qui compte les employés provoque ORA-04091 sur <code>INSERT … SELECT</code> et <code>UPDATE</code>. Écris un trigger composé sur <code>INSERT OR UPDATE OF dept_id</code> qui vérifie la règle.</p>
-      <details class="sol"><summary>Voir la solution</summary>
-        <script type="text/plsql" data-title="Solution">
-          CREATE OR REPLACE TRIGGER trg_dept_effectif_max
-            FOR INSERT OR UPDATE OF dept_id ON employes
-            COMPOUND TRIGGER
-            TYPE t_ids IS TABLE OF BOOLEAN INDEX BY PLS_INTEGER;
-            g_depts t_ids;
-            c_max CONSTANT PLS_INTEGER := 5;
-
-            AFTER EACH ROW IS
-            BEGIN
-              IF :NEW.dept_id IS NOT NULL THEN
-                g_depts(:NEW.dept_id) := TRUE;
-              END IF;
-            END AFTER EACH ROW;
-
-            AFTER STATEMENT IS
-              d  PLS_INTEGER := g_depts.FIRST;
-              nb PLS_INTEGER;
-            BEGIN
-              WHILE d IS NOT NULL LOOP
-                SELECT COUNT(*) INTO nb FROM employes WHERE dept_id = d;
-                IF nb > c_max THEN
-                  RAISE_APPLICATION_ERROR(-20303,
-                    'Département ' || d || ' : ' || nb || ' employés (max ' || c_max || ')');
-                END IF;
-                d := g_depts.NEXT(d);
-              END LOOP;
-            END AFTER STATEMENT;
-          END;
-          /
-          INSERT INTO employes (emp_id, nom, salaire, dept_id) VALUES (310, 'Test', 2000, 20);
-        </script>
-        <div class="output">ORA-20303: Département 20 : 6 employés (max 5)</div>
-        <p class="hint">Attention : cette vérification n'est pas sûre en concurrence (deux sessions qui ajoutent chacune un employé sans voir celui de l'autre). Une vraie solution verrouille la ligne du département (<code>SELECT … FOR UPDATE</code>) avant de compter. C'est un excellent point à mentionner en entretien.</p>
-      </details>
-    </div>
-  </div>
-
   <div class="ex" data-ex="ch10-e4">
-    <div class="ex-head"><h4>Exercice 4 · Prédire la sortie</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-head"><h4>Exercice 3 · Prédire la sortie</h4><span class="lvl l2">moyen</span></div>
     <div class="ex-body">
       <p>Les quatre triggers <code>t_bs</code>, <code>t_br</code>, <code>t_ar</code> et <code>t_as</code> de l'animation sont en place (recrée-les si tu les as supprimés). Sans exécuter, écris ce qu'affichent ces deux ordres :</p>
       <script type="text/plsql" data-title="Énoncé">
@@ -295,6 +255,51 @@ ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
         <div class="output">BEFORE STATEMENT
 AFTER STATEMENT</div>
         <p>Le département 40 n'a aucun employé : seuls les triggers d'instruction se déclenchent. Le <code>DELETE</code> n'affiche <strong>rien</strong> : les quatre triggers sont définis sur <code>UPDATE</code> seulement. Pour qu'ils réagissent aussi au <code>DELETE</code>, il faudrait <code>BEFORE UPDATE OR DELETE</code>, et dans <code>t_br</code>, <code>:NEW.salaire</code> vaudrait alors NULL. Termine par <code>ROLLBACK</code> et supprime les quatre triggers.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch10-e3">
+    <div class="ex-head"><h4>Exercice 4 · Cinq employés au plus par département</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Règle : un département ne peut pas avoir plus de 5 employés. Un trigger de ligne qui compte les employés provoque ORA-04091 sur <code>INSERT … SELECT</code> et <code>UPDATE</code>. Écris un trigger composé sur <code>INSERT OR UPDATE OF dept_id</code> qui vérifie la règle.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          CREATE OR REPLACE TRIGGER trg_dept_effectif_max
+            FOR INSERT OR UPDATE OF dept_id ON employes
+            COMPOUND TRIGGER
+            TYPE t_depts IS TABLE OF BOOLEAN INDEX BY PLS_INTEGER;
+            g_depts t_depts;
+            c_max CONSTANT PLS_INTEGER := 5;
+
+            AFTER EACH ROW IS
+            BEGIN
+              IF :NEW.dept_id IS NOT NULL THEN
+                g_depts(:NEW.dept_id) := TRUE;
+              END IF;
+            END AFTER EACH ROW;
+
+            AFTER STATEMENT IS
+              l_dept PLS_INTEGER := g_depts.FIRST;
+              l_nb   PLS_INTEGER;
+            BEGIN
+              WHILE l_dept IS NOT NULL LOOP
+                SELECT COUNT(*) INTO l_nb FROM employes WHERE dept_id = l_dept;
+                IF l_nb > c_max THEN
+                  RAISE_APPLICATION_ERROR(-20303,
+                    'Département ' || l_dept || ' : ' || l_nb || ' employés (max ' || c_max || ')');
+                END IF;
+                l_dept := g_depts.NEXT(l_dept);
+              END LOOP;
+            END AFTER STATEMENT;
+          END;
+          /
+          INSERT INTO employes (emp_id, nom, salaire, dept_id) VALUES (310, 'Test', 2000, 20);
+          ROLLBACK;                           -- annule tes essais (le DDL suivant validerait)
+          DROP TRIGGER trg_dept_effectif_max;   -- après tes essais
+        </script>
+        <div class="output">ORA-20303: Département 20 : 6 employés (max 5)</div>
+        <p class="hint">Ce trigger est un exercice : après l'essai, fais <code>ROLLBACK</code> puis <code>DROP TRIGGER trg_dept_effectif_max;</code>, sinon il refusera les embauches des chapitres suivants dans le département 20.</p>
+        <p class="hint">Attention : cette vérification n'est pas sûre en concurrence (deux sessions qui ajoutent chacune un employé sans voir celui de l'autre). Une vraie solution verrouille la ligne du département (<code>SELECT … FOR UPDATE</code>) avant de compter. C'est un excellent point à mentionner en entretien.</p>
       </details>
     </div>
   </div>
