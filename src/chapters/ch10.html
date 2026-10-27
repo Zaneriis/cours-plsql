@@ -21,11 +21,23 @@
   </table></div>
   <p class="prose">Déroule un <code>UPDATE</code> qui touche deux lignes : l'ordre de déclenchement est toujours le même.</p>
   <div data-stepper="trigger-order"></div>
+  <p class="prose">Les quatre triggers de l'animation sont des jouets : après l'essai, fais <code>ROLLBACK</code> puis <code>DROP TRIGGER t_bs;</code>, <code>t_br</code>, <code>t_ar</code> et <code>t_as</code>, sinon ils parleront à chaque <code>UPDATE</code> des chapitres suivants.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TD
+  A["Ordre DML (INSERT, UPDATE, DELETE)"] --> B["BEFORE STATEMENT<br/>une seule fois"]
+  B --> C{"Encore une ligne ?"}
+  C -- oui --> D["BEFORE ROW<br/>:NEW modifiable"]
+  D --> E["Écriture de la ligne<br/>et contrôle des contraintes"]
+  E --> F["AFTER ROW<br/>:NEW en lecture seule"]
+  F --> C
+  C -- non --> G["AFTER STATEMENT<br/>une seule fois"]
+  </pre><p class="cap">Ordre de déclenchement pour un ordre DML qui touche plusieurs lignes.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Un trigger d'<strong>instruction</strong> se déclenche même si l'ordre ne touche <strong>aucune</strong> ligne (<code>UPDATE … WHERE dept_id = 40</code>) ; les triggers de ligne, eux, ne s'exécutent pas. Autre point : l'ordre dans lequel les <strong>lignes</strong> sont traitées dépend du plan d'exécution. Ne fais jamais dépendre une règle de cet ordre.</p></div>
   <div class="table-wrap"><table>
     <thead><tr><th>Événement</th><th><code>:OLD</code></th><th><code>:NEW</code></th></tr></thead>
     <tbody>
       <tr><td><code>INSERT</code></td><td>Tous les champs NULL</td><td>Valeurs insérées</td></tr>
-      <tr><td><code>UPDATE</code></td><td>Valeurs avant</td><td>Valeurs après (modifiables en BEFORE)</td></tr>
+      <tr><td><code>UPDATE</code></td><td>Valeurs avant</td><td>Valeurs après (modifiables en BEFORE ROW)</td></tr>
       <tr><td><code>DELETE</code></td><td>Valeurs supprimées</td><td>Tous les champs NULL</td></tr>
     </tbody>
   </table></div>
@@ -52,15 +64,18 @@
       WHEN (NEW.salaire <> OLD.salaire)                    -- pas de « : » dans la clause WHEN
     BEGIN
       INSERT INTO historique_salaires (emp_id, ancien_salaire, nouveau_salaire)
-      VALUES (:OLD.emp_id, :OLD.salaire, :NEW.salaire);
+      VALUES (:OLD.emp_id, :OLD.salaire, :NEW.salaire);   -- date_modif et modifie_par : valeurs DEFAULT
     END;
     /
   </script>
+  <div class="callout pitfall"><span class="ct">Piège</span><p><code>UPDATE OF salaire</code> déclenche le trigger dès que <code>salaire</code> figure dans le <code>SET</code>, <strong>même si la valeur ne change pas</strong> (<code>SET salaire = salaire</code>, ou un écran qui renvoie toutes les colonnes). D'où la clause <code>WHEN</code>. Dans <code>WHEN</code>, on écrit <code>NEW</code> et <code>OLD</code> <strong>sans</strong> deux-points ; dans le corps, <code>:NEW</code> et <code>:OLD</code>. <code>WHEN</code> n'existe que pour les triggers de ligne.</p></div>
+  <p class="prose">Un même trigger peut couvrir plusieurs événements : les prédicats <code>INSERTING</code>, <code>UPDATING</code> et <code>DELETING</code> indiquent lequel est en cours. Ici, un trigger d'<strong>instruction</strong> qui interdit toute modification des départements hors des heures de bureau.</p>
+  <div class="callout pitfall"><span class="ct">Avant de l'exécuter</span><p>Si tu révises le soir (après 19 h 59) ou avant 8 h, ce trigger bloquera <strong>tout</strong> <code>INSERT</code>, <code>UPDATE</code> ou <code>DELETE</code> sur <code>departements</code>, y compris le script du <a href="#ch00">chapitre 00</a> qui recrée le schéma. Supprime-le dès que tu l'as essayé (dernière ligne du bloc).</p></div>
   <script type="text/plsql" data-title="Un trigger pour plusieurs événements">
     CREATE OR REPLACE TRIGGER trg_departements_controle
       BEFORE INSERT OR UPDATE OR DELETE ON departements
     BEGIN
-      IF TO_CHAR(SYSDATE, 'HH24') NOT BETWEEN '08' AND '19' THEN
+      IF TO_CHAR(SYSDATE, 'HH24') NOT BETWEEN '08' AND '19' THEN   -- autorisé de 8 h 00 à 19 h 59
         RAISE_APPLICATION_ERROR(-20200, 'Modification des départements interdite hors horaires');
       END IF;
       IF DELETING THEN
@@ -70,7 +85,12 @@
       END IF;
     END;
     /
+    UPDATE departements SET nom = 'Ressources humaines' WHERE dept_id = 40;
+    ROLLBACK;
+    DROP TRIGGER trg_departements_controle;   -- pour ne pas être bloqué plus tard
   </script>
+  <div class="output">Renommage de département</div>
+  <p class="prose">Cette sortie est celle obtenue en journée. Hors horaires, l'<code>UPDATE</code> échoue avec <code>ORA-20200: Modification des départements interdite hors horaires</code> (suivie de <code>ORA-06512</code> et <code>ORA-04088</code>, qui indiquent le trigger en cause), et rien n'est modifié.</p>
 
   <h3>INSTEAD OF : rendre une vue modifiable</h3>
   <script type="text/plsql" data-title="Trigger INSTEAD OF sur une vue de jointure">
@@ -80,16 +100,24 @@
 
     CREATE OR REPLACE TRIGGER trg_v_employes_dept_iu
       INSTEAD OF UPDATE ON v_employes_dept
-      FOR EACH ROW
+      FOR EACH ROW                                         -- facultatif : un INSTEAD OF est toujours de ligne
+    DECLARE
+      l_dept departements.dept_id%TYPE;
     BEGIN
+      SELECT dept_id INTO l_dept                           -- NO_DATA_FOUND si le département n'existe pas
+        FROM departements
+       WHERE nom = :NEW.dept_nom;
       UPDATE employes
          SET nom = :NEW.nom,
              salaire = :NEW.salaire,
-             dept_id = (SELECT dept_id FROM departements WHERE nom = :NEW.dept_nom)
+             dept_id = l_dept
        WHERE emp_id = :OLD.emp_id;
     END;
     /
+    UPDATE v_employes_dept SET dept_nom = 'Ventes' WHERE emp_id = 109;   -- Garcia passe aux Ventes
+    ROLLBACK;
   </script>
+  <p class="prose">Sans ce trigger, l'<code>UPDATE</code> de <code>dept_nom</code> échoue avec <code>ORA-01779</code> (colonne d'une table non « préservée par clé » dans la jointure). Le trigger traduit l'intention (« changer de département ») en ordre sur la vraie table. Le <code>SELECT INTO</code> séparé est volontaire : une sous-requête dans le <code>SET</code> mettrait silencieusement <code>dept_id</code> à NULL pour un nom de département inconnu.</p>
   <p class="prose">Il existe aussi des triggers <strong>système</strong> : sur événements DDL (<code>BEFORE DROP ON SCHEMA</code>), ou base (<code>AFTER LOGON ON DATABASE</code>, <code>AFTER SERVERERROR</code>).</p>
 
   <h2>La table mutante (ORA-04091)</h2>
@@ -102,7 +130,8 @@
     DECLARE
       l_moy NUMBER;
     BEGIN
-      SELECT AVG(salaire) INTO l_moy FROM employes WHERE dept_id = :NEW.dept_id;  -- lit la table en mutation
+      SELECT AVG(salaire) INTO l_moy
+        FROM employes WHERE dept_id = :NEW.dept_id;        -- lit la table en mutation
       IF :NEW.salaire > 3 * l_moy THEN
         RAISE_APPLICATION_ERROR(-20300, 'Salaire hors plafond');
       END IF;
@@ -111,17 +140,18 @@
     UPDATE employes SET salaire = salaire * 1.01 WHERE dept_id = 20;
   </script>
   <div class="output">ORA-04091: table RH.EMPLOYES is mutating, trigger/function may not see it
-ORA-06512: at "RH.TRG_SAL_PLAFOND", line 4</div>
+ORA-06512: at "RH.TRG_SAL_PLAFOND", line 4
+ORA-04088: error during execution of trigger 'RH.TRG_SAL_PLAFOND'</div>
+  <p class="prose">Le trigger compile sans problème : l'erreur n'apparaît qu'à l'exécution, et l'<code>UPDATE</code> entier est annulé. Le numéro de ligne (4) se compte depuis le <code>DECLARE</code> du trigger, pas depuis le <code>CREATE</code>.</p>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Un <code>INSERT … VALUES</code> d'<strong>une seule ligne</strong> ne provoque pas ORA-04091 dans un trigger de ligne : les tests unitaires passent, puis tout casse en production sur un <code>INSERT … SELECT</code> ou un chargement en masse. Autre fausse solution : déclarer le trigger en <code>PRAGMA AUTONOMOUS_TRANSACTION</code>. L'erreur disparaît, mais le trigger lit alors l'état <strong>validé</strong> de la table, sans les modifications en cours : la règle est vérifiée sur de mauvaises données.</p></div>
   <p class="prose">La solution moderne (11g+) est le <strong>trigger composé</strong> : on mémorise les lignes concernées dans la section de ligne, et on fait le contrôle dans la section <code>AFTER STATEMENT</code>, où la table est de nouveau lisible.</p>
   <script type="text/plsql" data-title="Résoudre avec un trigger composé">
-    DROP TRIGGER trg_sal_plafond;
-
-    CREATE OR REPLACE TRIGGER trg_sal_plafond
+    CREATE OR REPLACE TRIGGER trg_sal_plafond             -- remplace la version de ligne
       FOR UPDATE OF salaire ON employes
       COMPOUND TRIGGER
 
       TYPE t_depts IS TABLE OF BOOLEAN INDEX BY PLS_INTEGER;
-      g_depts t_depts;                                      -- état partagé entre les sections, le temps d'un ordre
+      g_depts t_depts;                         -- partagé entre les sections, le temps d'un ordre
 
       AFTER EACH ROW IS
       BEGIN
@@ -145,16 +175,22 @@ ORA-06512: at "RH.TRG_SAL_PLAFOND", line 4</div>
       END AFTER STATEMENT;
     END trg_sal_plafond;
     /
+    UPDATE employes SET salaire = salaire * 1.01 WHERE dept_id = 20;   -- passe désormais
+    UPDATE employes SET salaire = 40000 WHERE emp_id = 109;            -- moyenne 12 040, plafond 36 120
+    ROLLBACK;
   </script>
+  <div class="output">ORA-20300: Salaire hors plafond dans le département 20</div>
+  <p class="prose">Le premier <code>UPDATE</code> réussit. Le second échoue (la pile se poursuit avec <code>ORA-06512</code> et <code>ORA-04088</code>) et seul cet ordre est annulé. Les variables déclarées en tête d'un trigger composé sont réinitialisées à chaque ordre DML : pas de fuite d'un ordre à l'autre, contrairement à une variable de package.</p>
   <div class="callout tip"><span class="ct">Autres solutions à citer</span><p>Avant 11g : un package avec une collection, un trigger de ligne qui la remplit et un trigger d'instruction qui la traite. Souvent, la meilleure réponse est de <strong>sortir la règle du trigger</strong> : la mettre dans la procédure d'API qui fait la mise à jour, ou dans une contrainte déclarative quand c'est possible.</p></div>
 
   <h2>Bonnes pratiques</h2>
   <ul class="prose">
-    <li><strong>Pas de <code>COMMIT</code></strong> ni <code>ROLLBACK</code> dans un trigger (<code>ORA-04092</code>), sauf transaction autonome réservée au log.</li>
+    <li><strong>Pas de <code>COMMIT</code></strong> ni <code>ROLLBACK</code> dans un trigger (<code>ORA-04092</code>), sauf transaction autonome réservée au log (voir <a href="#ch05">chapitre 05</a>).</li>
+    <li>Si un trigger lève une exception, <strong>tout l'ordre DML</strong> est annulé, y compris le travail déjà fait par les autres triggers (rollback au niveau instruction). La transaction, elle, continue : les ordres précédents ne sont pas annulés.</li>
     <li>Garde les triggers <strong>courts</strong> : appelle une procédure de package plutôt que d'écrire 200 lignes dedans.</li>
     <li>Préfère une <strong>contrainte</strong> (<code>CHECK</code>, <code>FOREIGN KEY</code>, <code>UNIQUE</code>) à un trigger quand elle suffit : plus rapide, plus fiable, visible.</li>
     <li>Évite la logique métier « cachée » en cascade de triggers : difficile à déboguer, à tester et à faire évoluer.</li>
-    <li>Si plusieurs triggers du même type existent, impose l'ordre avec <code>FOLLOWS</code> / <code>PRECEDES</code> (11g).</li>
+    <li>Si plusieurs triggers du même type existent, impose l'ordre avec <code>FOLLOWS</code> (11g) ; sans cette clause, leur ordre n'est pas garanti.</li>
     <li>Désactiver temporairement : <code>ALTER TRIGGER … DISABLE</code> ou <code>ALTER TABLE … DISABLE ALL TRIGGERS</code> (chargements massifs).</li>
   </ul>
 
@@ -162,14 +198,21 @@ ORA-06512: at "RH.TRG_SAL_PLAFOND", line 4</div>
   <div class="ex" data-ex="ch10-e1">
     <div class="ex-head"><h4>Exercice 1 · Historique des salaires</h4><span class="lvl l1">facile</span></div>
     <div class="ex-body">
-      <p>Crée le trigger <code>trg_employes_audit_sal</code> vu plus haut, puis augmente de 10 % les commerciaux. Vérifie le contenu de <code>historique_salaires</code>. Que se passe-t-il pour un employé dont le salaire était NULL et passe à 2000 ? Corrige la clause <code>WHEN</code>.</p>
+      <p>Crée le trigger <code>trg_employes_audit_sal</code> vu plus haut, puis augmente de 10 % les commerciaux. Vérifie le contenu de <code>historique_salaires</code>. Que se passerait-il pour un employé dont le salaire était NULL (la colonne l'autorise) et passe à 2000 ? Corrige la clause <code>WHEN</code>.</p>
       <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Test">
+          UPDATE employes SET salaire = salaire * 1.1 WHERE poste = 'COMMERCIAL';
+          SELECT emp_id, ancien_salaire, nouveau_salaire FROM historique_salaires ORDER BY emp_id;
+          ROLLBACK;
+        </script>
+        <p>Trois lignes d'historique : 106 (3100 → 3410), 107 (2900 → 3190), 108 (3000 → 3300).</p>
         <p><code>NULL &lt;&gt; 2000</code> vaut NULL : le changement n'est <strong>pas</strong> tracé. Clause corrigée :</p>
         <script type="text/plsql" data-title="Solution">
           WHEN (   NEW.salaire <> OLD.salaire
                 OR (NEW.salaire IS NULL AND OLD.salaire IS NOT NULL)
                 OR (NEW.salaire IS NOT NULL AND OLD.salaire IS NULL))
         </script>
+        <p class="hint">Variante compacte, déjà vue au <a href="#ch02">chapitre 02</a> : <code>WHEN (DECODE(NEW.salaire, OLD.salaire, 0, 1) = 1)</code>, car <code>DECODE</code> considère deux NULL comme égaux.</p>
       </details>
     </div>
   </div>
@@ -196,7 +239,7 @@ ORA-06512: at "RH.TRG_SAL_PLAFOND", line 4</div>
     </div>
   </div>
   <div class="ex" data-ex="ch10-e3">
-    <div class="ex-head"><h4>Exercice 3 · Un seul manager par département au plus</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-head"><h4>Exercice 3 · Cinq employés au plus par département</h4><span class="lvl l3">difficile</span></div>
     <div class="ex-body">
       <p>Règle : un département ne peut pas avoir plus de 5 employés. Un trigger de ligne qui compte les employés provoque ORA-04091 sur <code>INSERT … SELECT</code> et <code>UPDATE</code>. Écris un trigger composé sur <code>INSERT OR UPDATE OF dept_id</code> qui vérifie la règle.</p>
       <details class="sol"><summary>Voir la solution</summary>
@@ -222,16 +265,34 @@ ORA-06512: at "RH.TRG_SAL_PLAFOND", line 4</div>
               WHILE d IS NOT NULL LOOP
                 SELECT COUNT(*) INTO nb FROM employes WHERE dept_id = d;
                 IF nb > c_max THEN
-                  RAISE_APPLICATION_ERROR(-20303, 'Département ' || d || ' : ' || nb || ' employés (max ' || c_max || ')');
+                  RAISE_APPLICATION_ERROR(-20303,
+                    'Département ' || d || ' : ' || nb || ' employés (max ' || c_max || ')');
                 END IF;
                 d := g_depts.NEXT(d);
               END LOOP;
             END AFTER STATEMENT;
           END;
           /
-          INSERT INTO employes (emp_id, nom, salaire, dept_id) VALUES (310, 'Test', 2000, 20);  -- ORA-20303 : 6 > 5
+          INSERT INTO employes (emp_id, nom, salaire, dept_id) VALUES (310, 'Test', 2000, 20);
         </script>
+        <div class="output">ORA-20303: Département 20 : 6 employés (max 5)</div>
         <p class="hint">Attention : cette vérification n'est pas sûre en concurrence (deux sessions qui ajoutent chacune un employé sans voir celui de l'autre). Une vraie solution verrouille la ligne du département (<code>SELECT … FOR UPDATE</code>) avant de compter. C'est un excellent point à mentionner en entretien.</p>
+      </details>
+    </div>
+  </div>
+
+  <div class="ex" data-ex="ch10-e4">
+    <div class="ex-head"><h4>Exercice 4 · Prédire la sortie</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Les quatre triggers <code>t_bs</code>, <code>t_br</code>, <code>t_ar</code> et <code>t_as</code> de l'animation sont en place (recrée-les si tu les as supprimés). Sans exécuter, écris ce qu'affichent ces deux ordres :</p>
+      <script type="text/plsql" data-title="Énoncé">
+        UPDATE employes SET salaire = salaire + 100 WHERE dept_id = 40;
+        DELETE FROM employes WHERE emp_id = 109;
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <div class="output">BEFORE STATEMENT
+AFTER STATEMENT</div>
+        <p>Le département 40 n'a aucun employé : seuls les triggers d'instruction se déclenchent. Le <code>DELETE</code> n'affiche <strong>rien</strong> : les quatre triggers sont définis sur <code>UPDATE</code> seulement. Pour qu'ils réagissent aussi au <code>DELETE</code>, il faudrait <code>BEFORE UPDATE OR DELETE</code>, et dans <code>t_br</code>, <code>:NEW.salaire</code> vaudrait alors NULL. Termine par <code>ROLLBACK</code> et supprime les quatre triggers.</p>
       </details>
     </div>
   </div>
@@ -241,6 +302,8 @@ ORA-06512: at "RH.TRG_SAL_PLAFOND", line 4</div>
 
   <h2>Questions d'entretien</h2>
   <details class="qa"><summary>Qu'est-ce qu'une table mutante et comment l'éviter ?</summary><div><p>Une table en cours de modification par l'ordre DML qui a déclenché un trigger de ligne. Le trigger ne peut pas la lire ni la modifier : <code>ORA-04091</code>. Solutions : trigger composé (stocker en section ligne, traiter en <code>AFTER STATEMENT</code>), trigger d'instruction, ou déplacer la règle hors du trigger.</p></div></details>
-  <details class="qa"><summary>Peut-on modifier :NEW dans un trigger AFTER ?</summary><div><p>Non. <code>:NEW</code> n'est modifiable que dans un trigger <code>BEFORE … FOR EACH ROW</code>, car la ligne n'est pas encore écrite. Dans un <code>AFTER</code>, il est en lecture seule (<code>ORA-04084</code>).</p></div></details>
-  <details class="qa"><summary>Dans quel ordre se déclenchent les triggers ?</summary><div><p><code>BEFORE STATEMENT</code>, puis pour chaque ligne <code>BEFORE ROW</code>, écriture de la ligne (et contrôle des contraintes), <code>AFTER ROW</code>, enfin <code>AFTER STATEMENT</code>. Pour plusieurs triggers du même type, l'ordre n'est pas garanti sans <code>FOLLOWS</code>.</p></div></details>
+  <details class="qa"><summary>Peut-on modifier :NEW dans un trigger AFTER ?</summary><div><p>Non. <code>:NEW</code> n'est modifiable que dans un trigger <code>BEFORE … FOR EACH ROW</code>, car la ligne n'est pas encore écrite. Dans un <code>AFTER</code>, il est en lecture seule (<code>ORA-04084</code> à la compilation). <code>:OLD</code> n'est jamais modifiable.</p></div></details>
+  <details class="qa"><summary>Dans quel ordre se déclenchent les triggers ?</summary><div><p><code>BEFORE STATEMENT</code>, puis pour chaque ligne <code>BEFORE ROW</code>, écriture de la ligne, <code>AFTER ROW</code>, enfin <code>AFTER STATEMENT</code>. Pour plusieurs triggers du même type, l'ordre n'est pas garanti sans <code>FOLLOWS</code> (11g). L'ordre de traitement des lignes, lui, n'est jamais garanti.</p></div></details>
+  <details class="qa"><summary>Que devient l'ordre DML quand un trigger lève une exception ?</summary><div><p>L'ordre DML entier est annulé, avec tout ce que ses triggers avaient déjà fait (rollback au niveau instruction). La transaction reste ouverte : les ordres précédents ne sont pas perdus, l'appelant décide de valider ou d'annuler. Seul ce qui a été écrit dans une transaction autonome (un journal d'erreurs, par exemple) survit.</p></div></details>
+  <details class="qa"><summary>Trigger ou contrainte : que choisis-tu pour une règle métier ?</summary><div><p>Une contrainte déclarative (<code>CHECK</code>, <code>FOREIGN KEY</code>, <code>UNIQUE</code>) dès qu'elle suffit : elle est plus rapide, toujours active, sûre en concurrence et visible dans le dictionnaire. Le trigger sert quand la règle porte sur plusieurs lignes ou plusieurs tables, ou pour l'audit. Même alors, beaucoup d'équipes préfèrent placer la règle dans l'API PL/SQL (un package) qui fait les mises à jour, pour éviter la logique cachée. Une règle multi-lignes en trigger doit aussi gérer la concurrence (verrou), sinon deux sessions peuvent la violer ensemble.</p></div></details>
 </section>

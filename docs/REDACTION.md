@@ -101,10 +101,10 @@ Chaque exemple part de cet état initial, sauf mention contraire (et se termine 
 
 - ch04 : fonctions `employes_du_dept`, `rechercher_employes`
 - ch05 : procédure `log_erreur(p_programme)` (transaction autonome), procédure `embaucher` (autonome, hors package), fonction `diviser`
-- ch06 : `augmenter_salaire(p_emp_id, p_pct DEFAULT 5, p_nouveau OUT)`, `anciennete(p_emp_id)`, `calcul_prime`, `stats_dept`, `annees_depuis`, `nom_departement`
+- ch06 : `augmenter_salaire(p_emp_id, p_pct DEFAULT 5, p_nouveau OUT)`, `anciennete(p_emp_id)`, `calcul_prime`, `stats_dept`, `annees_depuis(p_debut, p_fin)`, `nom_departement`
 - ch07 : packages `pkg_rh`, `pkg_dates`, `pkg_cache_dept`
 - ch08 : type SQL `t_liste_id AS TABLE OF NUMBER`
-- ch09 : types `t_ligne_paie`, `t_paies`, fonction `echeancier`, table `employes_archive`
+- ch09 : types `t_ligne_paie`, `t_paies`, fonction `echeancier`, tables `employes_archive` et `err$_employes` (DBMS_ERRLOG)
 - ch10 : triggers `trg_employes_bi`, `trg_employes_audit_sal`, `trg_sal_plafond`, vue `v_employes_dept`
 - ch11 : `nb_lignes`, `chercher`, `compter_par_poste`
 - ch12 : package `pkg_log`, table `journal`

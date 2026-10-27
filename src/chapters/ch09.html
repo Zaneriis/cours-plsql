@@ -5,28 +5,30 @@
   <p class="lead">Le sujet qui distingue un développeur PL/SQL confirmé. Dès que tu traites des milliers de lignes, la question n'est plus « est-ce que ça marche » mais « combien d'allers-retours entre les moteurs ».</p>
   <ul class="goals">
     <li>expliquer le coût d'un changement de contexte avec un exemple chiffré ;</li>
-    <li>charger des lignes par lots avec <code>BULK COLLECT … LIMIT</code> ;</li>
-    <li>écrire en masse avec <code>FORALL</code> et gérer les erreurs ligne par ligne avec <code>SAVE EXCEPTIONS</code> ;</li>
+    <li>charger des lignes par lots avec <code>BULK COLLECT … LIMIT</code> et savoir pourquoi on teste <code>COUNT = 0</code> ;</li>
+    <li>écrire en masse avec <code>FORALL</code> et gérer les erreurs ligne par ligne avec <code>SAVE EXCEPTIONS</code> ou <code>LOG ERRORS</code> ;</li>
     <li>savoir quand le SQL pur bat tout le reste.</li>
   </ul>
 
   <h2>Le problème : ligne par ligne, lent par lent</h2>
-  <p class="prose">Une boucle qui exécute un <code>INSERT</code> à chaque tour fait deux changements de contexte par ligne (PL/SQL vers SQL, puis retour). <code>FORALL</code> envoie toutes les lignes au moteur SQL en un seul aller-retour. Lance la course :</p>
+  <p class="prose">PL/SQL et SQL sont deux moteurs distincts. Chaque ordre SQL exécuté depuis PL/SQL provoque un <strong>changement de contexte</strong> : le moteur PL/SQL passe la main au moteur SQL (avec les variables liées), puis le reprend. Une boucle qui exécute un <code>INSERT</code> à chaque tour paie ce coût une fois par ligne : 100 000 lignes, 100 000 allers-retours. <code>FORALL</code> envoie toutes les lignes au moteur SQL en un seul aller-retour. Lance la course :</p>
   <div class="diagram" data-race></div>
-  <p class="prose">Sur 100 000 lignes, l'écart typique est d'un facteur 10 à 50. Tom Kyte, l'une des références d'Oracle, résume l'ordre de préférence ainsi :</p>
+  <p class="prose">Sur un gros volume, l'écart est couramment d'un ordre de grandeur (facteur 10 ou plus), selon le traitement et la machine. Tom Kyte, l'une des références d'Oracle, résume l'ordre de préférence ainsi :</p>
   <ol class="prose">
     <li>Fais-le en <strong>un seul ordre SQL</strong> si c'est possible (<code>INSERT … SELECT</code>, <code>MERGE</code>, <code>UPDATE</code> avec sous-requête).</li>
     <li>Sinon, fais-le en <strong>PL/SQL par lots</strong> (<code>BULK COLLECT</code> + <code>FORALL</code>).</li>
     <li>Ligne par ligne seulement quand il n'y a pas d'autre choix.</li>
   </ol>
+  <div class="callout tip"><span class="ct">Astuce : la boucle FOR de curseur lit déjà par lots</span><p>Depuis 10g, avec <code>PLSQL_OPTIMIZE_LEVEL</code> à 2 (la valeur par défaut) ou plus, le compilateur transforme <code>FOR r IN (SELECT …) LOOP</code> en lecture par paquets de 100 lignes. La <strong>lecture</strong> est donc déjà optimisée. En revanche, un <code>UPDATE</code> ou un <code>INSERT</code> placé dans la boucle reste exécuté ligne par ligne : c'est là que <code>FORALL</code> fait la différence.</p></div>
 
   <h2>BULK COLLECT : lire en masse</h2>
+  <p class="prose"><code>BULK COLLECT INTO</code> remplit une ou plusieurs collections en un seul appel. Les types de collections sont détaillés au <a href="#ch08">chapitre 08</a> ; ici on utilise surtout des <em>nested tables</em> locales.</p>
   <script type="text/plsql" data-title="Charger tout un résultat d'un coup">
     DECLARE
       TYPE t_emps IS TABLE OF employes%ROWTYPE;          -- pas besoin d'initialiser : BULK COLLECT le fait
       l_emps t_emps;
     BEGIN
-      SELECT * BULK COLLECT INTO l_emps FROM employes WHERE dept_id = 30;
+      SELECT * BULK COLLECT INTO l_emps FROM employes WHERE dept_id = 30 ORDER BY emp_id;
       DBMS_OUTPUT.PUT_LINE(l_emps.COUNT || ' lignes chargées');
       FOR i IN 1 .. l_emps.COUNT LOOP                     -- dense, indicé à partir de 1
         DBMS_OUTPUT.PUT_LINE(l_emps(i).nom);
@@ -34,9 +36,15 @@
     END;
     /
   </script>
+  <div class="output">4 lignes chargées
+Moreau
+Simon
+Laurent
+Michel</div>
   <div class="callout pitfall"><span class="ct">Piège</span><p><code>BULK COLLECT</code> ne lève <strong>jamais</strong> <code>NO_DATA_FOUND</code> : sans ligne, la collection est simplement vide (<code>COUNT = 0</code>). Et sans <code>LIMIT</code>, une table de 50 millions de lignes est chargée entièrement en mémoire de session (PGA).</p></div>
 
   <h3>Le schéma standard avec LIMIT</h3>
+  <p class="prose">Avec un curseur explicite, <code>FETCH … BULK COLLECT INTO … LIMIT n</code> lit au plus <code>n</code> lignes à chaque appel. La collection est <strong>vidée puis remplie</strong> à chaque <code>FETCH</code> (les lots ne s'accumulent pas), ce qui borne la mémoire.</p>
   <script type="text/plsql" data-title="Traitement par lots de 1 000 lignes">
     DECLARE
       CURSOR c IS SELECT emp_id, salaire FROM employes;
@@ -58,13 +66,17 @@
           UPDATE employes SET salaire = l_sals(i) WHERE emp_id = l_ids(i);
       END LOOP;
       CLOSE c;
+      ROLLBACK;                                       -- exemple : on remet le schéma en l'état
     END;
     /
   </script>
-  <div class="callout pitfall"><span class="ct">Piège d'entretien : EXIT WHEN c%NOTFOUND</span><p>Si le dernier lot contient moins de lignes que <code>LIMIT</code> (par exemple 350 sur 1 000), <code>c%NOTFOUND</code> est déjà <code>TRUE</code> après ce <code>FETCH</code>. Avec <code>EXIT WHEN c%NOTFOUND</code> juste après le <code>FETCH</code>, ces 350 lignes ne sont jamais traitées. Soit on teste <code>COUNT = 0</code> juste après le <code>FETCH</code>, soit on met <code>EXIT WHEN c%NOTFOUND</code> à la <strong>fin</strong> de la boucle.</p></div>
+  <p class="prose">Pour voir pourquoi on teste <code>COUNT = 0</code>, suis un curseur de 5 lignes lu par lots de 2 :</p>
+  <div data-stepper="ch09-limit"></div>
+  <div class="callout pitfall"><span class="ct">Piège d'entretien : EXIT WHEN c%NOTFOUND</span><p>Si le dernier lot contient moins de lignes que <code>LIMIT</code> (1 ligne sur 2 dans l'animation, 350 sur 1 000 en vrai), <code>c%NOTFOUND</code> est déjà <code>TRUE</code> après ce <code>FETCH</code>. Avec <code>EXIT WHEN c%NOTFOUND</code> juste après le <code>FETCH</code>, ces lignes ne sont jamais traitées. Soit on teste <code>COUNT = 0</code> juste après le <code>FETCH</code> (au prix d'un dernier <code>FETCH</code> vide), soit on met <code>EXIT WHEN c%NOTFOUND</code> à la <strong>fin</strong> de la boucle, après le traitement du lot.</p></div>
+  <div class="callout tip"><span class="ct">Astuce : quelle valeur pour LIMIT ?</span><p>Entre 100 et 1 000 : l'essentiel du gain est atteint dès 100, et au-delà la mémoire augmente sans gain notable. Pas de valeur magique : mesure sur ton cas.</p></div>
 
   <h2>FORALL : écrire en masse</h2>
-  <p class="prose"><code>FORALL</code> n'est pas une boucle : c'est <strong>un seul ordre DML</strong> exécuté avec un tableau de valeurs liées. Il ne peut contenir qu'un seul ordre <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> ou <code>MERGE</code>.</p>
+  <p class="prose"><code>FORALL</code> n'est pas une boucle : c'est <strong>un seul ordre DML</strong> exécuté avec un tableau de valeurs liées. Il ne peut contenir qu'un seul ordre <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code> ou <code>MERGE</code>, sans <code>IF</code> ni appel de procédure. Après coup, <code>SQL%ROWCOUNT</code> donne le total et <code>SQL%BULK_ROWCOUNT(i)</code> le nombre de lignes touchées par l'itération <code>i</code>.</p>
   <script type="text/plsql" data-title="FORALL et SQL%BULK_ROWCOUNT">
     DECLARE
       TYPE t_depts IS TABLE OF NUMBER;
@@ -85,10 +97,24 @@
 Dept 20 : 5 ligne(s)
 Dept 30 : 4 ligne(s)
 Dept 40 : 0 ligne(s)</div>
-  <p class="prose">Pour une collection creuse, <code>FORALL i IN 1 .. n</code> échoue. On utilise <code>FORALL i IN INDICES OF l_coll</code> (parcourt les indices existants) ou <code>VALUES OF l_index</code> (parcourt les indices listés dans une autre collection).</p>
+  <p class="prose">Un <code>UPDATE</code> qui ne touche aucune ligne n'est pas une erreur : c'est <code>SQL%BULK_ROWCOUNT</code> qui permet de repérer le département 40 vide.</p>
+
+  <h3>Records, RETURNING et collections creuses</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Besoin</th><th>Syntaxe</th></tr></thead>
+    <tbody>
+      <tr><td>Insérer des lignes entières</td><td><code>FORALL i IN 1 .. l_emps.COUNT INSERT INTO employes_archive VALUES l_emps(i);</code> (collection de <code>%ROWTYPE</code>, sans parenthèses)</td></tr>
+      <tr><td>Utiliser un champ de record</td><td><code>… WHERE emp_id = l_emps(i).emp_id</code> (autorisé depuis 11g, PLS-00436 avant)</td></tr>
+      <tr><td>Récupérer les valeurs écrites</td><td><code>FORALL … UPDATE … RETURNING salaire BULK COLLECT INTO l_nouv;</code></td></tr>
+      <tr><td>Collection creuse (trous)</td><td><code>FORALL i IN INDICES OF l_coll</code> : parcourt les indices existants</td></tr>
+      <tr><td>Sous-ensemble choisi</td><td><code>FORALL i IN VALUES OF l_index</code> : parcourt les indices listés dans une autre collection (de <code>PLS_INTEGER</code>)</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout pitfall"><span class="ct">Piège : FORALL i IN 1 .. n sur une collection creuse</span><p>Si un élément a été supprimé (<code>DELETE(3)</code>), <code>FORALL i IN 1 .. l_coll.COUNT</code> lève <code>ORA-22160: element at index [3] does not exist</code> et rate le dernier indice. Utilise <code>INDICES OF</code>.</p></div>
 
   <h3>SAVE EXCEPTIONS : ne pas tout perdre pour une ligne</h3>
-  <p class="prose">Par défaut, la première erreur arrête le <code>FORALL</code> (les lignes déjà traitées restent faites, pas les suivantes). Avec <code>SAVE EXCEPTIONS</code>, Oracle traite toutes les lignes, mémorise les échecs, puis lève <code>ORA-24381</code> à la fin. On lit le détail dans <code>SQL%BULK_EXCEPTIONS</code>.</p>
+  <p class="prose">Par défaut, la première erreur arrête le <code>FORALL</code> : seule la ligne fautive est annulée (rollback au niveau de l'instruction), les itérations précédentes restent faites et les suivantes ne sont pas exécutées. Avec <code>SAVE EXCEPTIONS</code>, Oracle exécute toutes les itérations, mémorise les échecs, puis lève <code>ORA-24381: error(s) in array DML</code> à la fin. On lit le détail dans <code>SQL%BULK_EXCEPTIONS</code> : <code>COUNT</code>, puis pour chaque erreur <code>ERROR_INDEX</code> (l'itération en échec) et <code>ERROR_CODE</code> (le code Oracle, <strong>positif</strong>).</p>
+  <p class="prose">Exemple : retirer 4 000 au salaire de chaque employé du département 20. Durand (3 900) et Garcia (1 400) passeraient sous zéro et violent <code>ck_emp_salaire</code>.</p>
   <script type="text/plsql" data-title="FORALL … SAVE EXCEPTIONS">
     DECLARE
       TYPE t_ids IS TABLE OF employes.emp_id%TYPE;
@@ -96,10 +122,11 @@ Dept 40 : 0 ligne(s)</div>
       e_erreurs_bulk EXCEPTION;
       PRAGMA EXCEPTION_INIT(e_erreurs_bulk, -24381);
     BEGIN
-      SELECT emp_id BULK COLLECT INTO l_ids FROM employes WHERE dept_id = 20;
+      SELECT emp_id BULK COLLECT INTO l_ids FROM employes WHERE dept_id = 20 ORDER BY emp_id;
 
       FORALL i IN 1 .. l_ids.COUNT SAVE EXCEPTIONS
         UPDATE employes SET salaire = salaire - 4000 WHERE emp_id = l_ids(i);
+      ROLLBACK;
     EXCEPTION
       WHEN e_erreurs_bulk THEN
         DBMS_OUTPUT.PUT_LINE(SQL%ROWCOUNT || ' lignes mises à jour, '
@@ -115,9 +142,41 @@ Dept 40 : 0 ligne(s)</div>
   <div class="output">3 lignes mises à jour, 2 en erreur
   emp 103 : ORA-02290: check constraint (.) violated
   emp 109 : ORA-02290: check constraint (.) violated</div>
+  <p class="prose">Les itérations 3 (emp 103) et 5 (emp 109) ont échoué ; 101, 102 et 104 sont bien mis à jour (ils le restent tant qu'on ne fait pas <code>ROLLBACK</code>). Le <code>ORDER BY</code> rend l'ordre des indices prévisible.</p>
+  <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant P as Moteur PL/SQL
+  participant S as Moteur SQL
+  P->>S: UPDATE + 5 emp_id liés (un seul appel)
+  S->>S: itération 1 (101) OK
+  S->>S: itération 2 (102) OK
+  S->>S: itération 3 (103) ORA-02290, mémorisée
+  S->>S: itération 4 (104) OK
+  S->>S: itération 5 (109) ORA-02290, mémorisée
+  S-->>P: ORA-24381 (erreurs dans le DML de tableau)
+  Note over P: handler WHEN e_erreurs_bulk<br/>SQL%BULK_EXCEPTIONS.COUNT = 2<br/>ERROR_INDEX 3 et 5, ERROR_CODE 2290
+    </pre><p class="cap">FORALL … SAVE EXCEPTIONS : toutes les itérations sont tentées, une seule exception est levée à la fin.</p></div>
+  <div class="callout pitfall"><span class="ct">Pièges de SAVE EXCEPTIONS</span><p><code>ERROR_CODE</code> vaut <code>2290</code>, pas <code>-2290</code> : il faut écrire <code>SQLERRM(-ERROR_CODE)</code>. Ce message est générique : le nom de la contrainte est perdu (<code>(.)</code>). Et si tu oublies de traiter <code>ORA-24381</code>, l'exception remonte comme n'importe quelle autre. Enfin, avec <code>INDICES OF</code> ou <code>VALUES OF</code>, <code>ERROR_INDEX</code> est le <strong>numéro d'itération</strong>, pas forcément l'indice de la collection : pour une collection creuse, il faut le retraduire.</p></div>
+  <div class="callout interview"><span class="ct">En entretien</span><p>On te demandera souvent « comment traiter un million de lignes sans que la première erreur fasse tout échouer ? ». Réponse attendue : <code>BULK COLLECT … LIMIT</code>, <code>FORALL … SAVE EXCEPTIONS</code>, journalisation des lignes de <code>SQL%BULK_EXCEPTIONS</code>, <code>COMMIT</code> selon la règle métier. Puis ajoute que, si la logique tient en un ordre SQL, <code>LOG ERRORS</code> fait la même chose sans PL/SQL.</p></div>
+
+  <h3>L'alternative SQL : DML error logging</h3>
+  <p class="prose">Depuis 10gR2, la clause <code>LOG ERRORS</code> permet à un seul ordre SQL de continuer malgré des lignes en erreur, qui sont écrites dans une table d'erreurs. La table se crée une fois avec <code>DBMS_ERRLOG</code>.</p>
+  <script type="text/plsql" data-title="UPDATE … LOG ERRORS">
+    EXEC DBMS_ERRLOG.CREATE_ERROR_LOG(dml_table_name => 'EMPLOYES');   -- crée ERR$_EMPLOYES (une fois)
+
+    UPDATE employes SET salaire = salaire - 4000
+     WHERE dept_id = 20
+       LOG ERRORS INTO err$_employes ('ch09') REJECT LIMIT UNLIMITED;   -- 3 lignes mises à jour
+
+    SELECT ora_err_number$, emp_id FROM err$_employes ORDER BY emp_id;
+    ROLLBACK;
+  </script>
+  <div class="output">2290 103
+2290 109</div>
+  <p class="prose">La table contient aussi <code>ORA_ERR_MESG$</code> (message complet, avec le nom de la contrainte) et l'étiquette <code>'ch09'</code>. Les lignes d'erreur sont écrites de façon autonome : le <code>ROLLBACK</code> ne les efface pas. Limites : sans <code>REJECT LIMIT</code>, la valeur par défaut est 0 (la première erreur fait échouer l'ordre), et certaines erreurs ne sont pas journalisées (contraintes différées notamment).</p>
 
   <h2>Fonctions pipelined</h2>
-  <p class="prose">Une fonction « table » renvoie une collection qu'on interroge avec <code>TABLE()</code>. En mode <code>PIPELINED</code>, elle envoie chaque ligne dès qu'elle est prête (<code>PIPE ROW</code>) au lieu de construire toute la collection en mémoire : idéal pour des transformations de données en flux (ETL).</p>
+  <p class="prose">Une fonction « table » renvoie une collection qu'on interroge avec <code>TABLE()</code> (type SQL obligatoire, voir <a href="#ch08">chapitre 08</a>). En mode <code>PIPELINED</code>, elle envoie chaque ligne dès qu'elle est prête (<code>PIPE ROW</code>) au lieu de construire toute la collection en mémoire : la requête appelante commence à recevoir des lignes tout de suite. C'est idéal pour des transformations de données en flux (ETL).</p>
   <script type="text/plsql" data-title="Fonction pipelined">
     CREATE OR REPLACE TYPE t_ligne_paie AS OBJECT (emp_id NUMBER, mois DATE, montant NUMBER);
     /
@@ -127,14 +186,28 @@ Dept 40 : 0 ligne(s)</div>
     BEGIN
       FOR r IN (SELECT emp_id, salaire FROM employes) LOOP
         FOR m IN 1 .. 12 LOOP
-          PIPE ROW (t_ligne_paie(r.emp_id, TO_DATE(p_annee || '-' || m || '-01', 'YYYY-MM-DD'), r.salaire));
+          PIPE ROW (t_ligne_paie(r.emp_id, ADD_MONTHS(TO_DATE(p_annee || '-01-01', 'YYYY-MM-DD'), m - 1),
+                                 r.salaire));
         END LOOP;
       END LOOP;
       RETURN;                                   -- RETURN sans valeur
     END;
     /
-    SELECT emp_id, SUM(montant) FROM TABLE(echeancier(2026)) GROUP BY emp_id;
+    SELECT emp_id, SUM(montant) AS total FROM TABLE(echeancier(2026)) GROUP BY emp_id ORDER BY emp_id;
   </script>
+  <div class="output">100 114000
+101  86400
+102  51600
+103  46800
+104  57600
+105  81600
+106  37200
+107  34800
+108  36000
+109  16800</div>
+  <p class="prose">10 employés × 12 mois = 120 lignes produites, regroupées par la requête (total général 562 800 = 46 900 × 12). Depuis 12.2, on peut écrire <code>FROM echeancier(2026)</code> sans <code>TABLE()</code>.</p>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Une fonction pipelined se termine par <code>RETURN;</code> <strong>sans valeur</strong> : les lignes sont déjà parties avec <code>PIPE ROW</code>. Et on ne l'appelle pas comme une fonction ordinaire en PL/SQL (<code>l_t := echeancier(2026)</code> est refusé) : on l'interroge en SQL.</p></div>
+  <p class="prose">Pour aller plus loin : avec <code>PARALLEL_ENABLE</code> et un paramètre <code>SYS_REFCURSOR</code> partitionné (<code>PARALLEL_ENABLE (PARTITION p_cur BY ANY)</code>), une fonction pipelined peut être exécutée par plusieurs processus parallèles, chacun traitant une partie des lignes du curseur.</p>
 
   <h2>Exercices</h2>
   <div class="ex" data-ex="ch09-e1">
@@ -155,7 +228,7 @@ Dept 40 : 0 ligne(s)</div>
               EXIT WHEN l_emps.COUNT = 0;
               l_lot := l_lot + 1;
               FORALL i IN 1 .. l_emps.COUNT
-                INSERT INTO employes_archive VALUES l_emps(i);
+                INSERT INTO employes_archive VALUES l_emps(i);   -- record entier, sans parenthèses
               DBMS_OUTPUT.PUT_LINE('Lot ' || l_lot || ' : ' || SQL%ROWCOUNT || ' ligne(s)');
             END LOOP;
             CLOSE c;
@@ -163,11 +236,14 @@ Dept 40 : 0 ligne(s)</div>
           END;
           /
         </script>
+        <div class="output">Lot 1 : 2 ligne(s)
+Lot 2 : 2 ligne(s)
+Lot 3 : 1 ligne(s)</div>
         <script type="text/plsql" data-title="Solution SQL pur (la meilleure)">
           INSERT INTO employes_archive
           SELECT * FROM employes WHERE date_embauche < DATE '2020-01-01';
         </script>
-        <p class="hint">5 employés concernés : 3 lots (2, 2, 1). En entretien, mentionne toujours la solution SQL pur en premier.</p>
+        <p class="hint">5 employés concernés (100, 101, 102, 104, 105) : 3 lots (2, 2, 1), puis un quatrième <code>FETCH</code> vide qui fait sortir de la boucle. <code>INSERT … VALUES l_emps(i)</code> suppose que la table cible a exactement les colonnes de <code>employes</code>, dans le même ordre : c'est le cas grâce au <code>CREATE TABLE … AS SELECT</code>. En entretien, mentionne toujours la solution SQL pur en premier.</p>
       </details>
     </div>
   </div>
@@ -193,20 +269,24 @@ Dept 40 : 0 ligne(s)</div>
             l_ids  t_ids;
             l_coms t_coms;
           BEGIN
-            SELECT emp_id, NVL(commission, 0) + ROUND(salaire * 0.1)
+            SELECT emp_id, NVL(commission, 0) + ROUND(salaire * 0.1)   -- le calcul se fait en SQL
               BULK COLLECT INTO l_ids, l_coms
               FROM employes WHERE poste = 'COMMERCIAL';
 
             FORALL i IN 1 .. l_ids.COUNT
               UPDATE employes SET commission = l_coms(i) WHERE emp_id = l_ids(i);
+            DBMS_OUTPUT.PUT_LINE(SQL%ROWCOUNT || ' commissions mises à jour');
+            ROLLBACK;
           END;
           /
         </script>
+        <div class="output">3 commissions mises à jour</div>
         <script type="text/plsql" data-title="Version SQL pur">
           UPDATE employes
              SET commission = NVL(commission, 0) + ROUND(salaire * 0.1)
            WHERE poste = 'COMMERCIAL';
         </script>
+        <p class="hint">Simon passe à 760, Laurent à 890, Michel à 300. Pas de <code>LIMIT</code> ici : 3 lignes, et dans la vraie vie le SQL pur suffit. Le code lent n'était d'ailleurs « lent » que pour l'<code>UPDATE</code> : la lecture de la boucle FOR était déjà faite par paquets de 100.</p>
       </details>
     </div>
   </div>
@@ -219,6 +299,9 @@ Dept 40 : 0 ligne(s)</div>
           DECLARE
             TYPE t_emps IS TABLE OF employes%ROWTYPE INDEX BY PLS_INTEGER;
             l_emps t_emps;
+            l_idx  PLS_INTEGER;
+            l_code PLS_INTEGER;
+            l_msg  VARCHAR2(4000);
             e_bulk EXCEPTION;
             PRAGMA EXCEPTION_INIT(e_bulk, -24381);
 
@@ -242,18 +325,59 @@ Dept 40 : 0 ligne(s)</div>
             EXCEPTION
               WHEN e_bulk THEN
                 FOR j IN 1 .. SQL%BULK_EXCEPTIONS.COUNT LOOP
+                  l_idx  := SQL%BULK_EXCEPTIONS(j).ERROR_INDEX;
+                  l_code := SQL%BULK_EXCEPTIONS(j).ERROR_CODE;           -- positif : 1, 2290
+                  l_msg  := 'id ' || l_emps(l_idx).emp_id || ' : ' || SQLERRM(-l_code);
                   INSERT INTO journal_erreurs (programme, code, message)
-                  VALUES ('import',
-                          -SQL%BULK_EXCEPTIONS(j).ERROR_CODE,
-                          'id ' || l_emps(SQL%BULK_EXCEPTIONS(j).ERROR_INDEX).emp_id || ' : '
-                          || SQLERRM(-SQL%BULK_EXCEPTIONS(j).ERROR_CODE));
+                  VALUES ('import', -l_code, l_msg);
                 END LOOP;
             END;
             COMMIT;   -- valide les 3 lignes correctes et le journal
           END;
           /
         </script>
-        <p class="hint"><code>SQL%BULK_EXCEPTIONS</code> reste disponible jusqu'au prochain <code>FORALL</code> : les <code>INSERT</code> dans le journal ne l'effacent pas. Résultat : 3 employés insérés, 2 lignes dans <code>journal_erreurs</code>.</p>
+        <p class="hint">Résultat : 301, 303 et 304 insérés ; 2 lignes dans <code>journal_erreurs</code> (codes -1 et -2290, messages <code>id 102 : ORA-00001: unique constraint (.) violated</code> et <code>id 302 : ORA-02290: check constraint (.) violated</code>). On passe par la variable <code>l_msg</code> car <code>SQLERRM</code> ne peut pas être appelé directement dans un ordre SQL. <code>SQL%BULK_EXCEPTIONS</code> décrit le dernier <code>FORALL</code> exécuté : les <code>INSERT</code> du journal ne l'effacent pas. Le bloc imbriqué permet de continuer vers le <code>COMMIT</code> après avoir traité <code>ORA-24381</code>.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch09-e4">
+    <div class="ex-head"><h4>Exercice 4 · Filtrer avant d'écrire avec INDICES OF</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Charge les <code>emp_id</code> et les salaires du département 20 (triés par <code>emp_id</code>), calcule en mémoire le salaire diminué de 4 000 et <strong>supprime de la collection</strong> les employés dont le nouveau salaire serait négatif ou nul. Mets à jour les autres avec un seul <code>FORALL</code>, puis affiche pour chacun le nombre de lignes modifiées avec <code>SQL%BULK_ROWCOUNT</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            TYPE t_ids  IS TABLE OF employes.emp_id%TYPE;
+            TYPE t_sals IS TABLE OF employes.salaire%TYPE;
+            l_ids  t_ids;
+            l_sals t_sals;
+            i      PLS_INTEGER;
+          BEGIN
+            SELECT emp_id, salaire - 4000 BULK COLLECT INTO l_ids, l_sals
+              FROM employes WHERE dept_id = 20 ORDER BY emp_id;
+
+            FOR k IN 1 .. l_ids.COUNT LOOP
+              IF l_sals(k) <= 0 THEN
+                l_ids.DELETE(k);                 -- la collection devient creuse
+              END IF;
+            END LOOP;
+
+            FORALL k IN INDICES OF l_ids
+              UPDATE employes SET salaire = l_sals(k) WHERE emp_id = l_ids(k);
+
+            i := l_ids.FIRST;
+            WHILE i IS NOT NULL LOOP
+              DBMS_OUTPUT.PUT_LINE('emp ' || l_ids(i) || ' : ' || SQL%BULK_ROWCOUNT(i) || ' ligne(s)');
+              i := l_ids.NEXT(i);
+            END LOOP;
+            ROLLBACK;
+          END;
+          /
+        </script>
+        <div class="output">emp 101 : 1 ligne(s)
+emp 102 : 1 ligne(s)
+emp 104 : 1 ligne(s)</div>
+        <p class="hint">Les indices 3 (103) et 5 (109) sont supprimés. <code>FORALL k IN 1 .. l_ids.COUNT</code> échouerait ici (<code>ORA-22160</code>) : <code>COUNT</code> vaut 3 mais les indices existants sont 1, 2 et 4. Avec <code>INDICES OF</code>, <code>SQL%BULK_ROWCOUNT</code> utilise les mêmes indices que la collection, d'où le parcours avec <code>FIRST</code> / <code>NEXT</code>. On n'efface que <code>l_ids</code> : <code>l_sals</code> peut garder ses éléments, seuls les indices de la collection citée dans <code>INDICES OF</code> comptent.</p>
       </details>
     </div>
   </div>
@@ -263,7 +387,8 @@ Dept 40 : 0 ligne(s)</div>
 
   <h2>Questions d'entretien</h2>
   <details class="qa"><summary>Qu'est-ce qu'un changement de contexte et comment le réduire ?</summary><div><p>Le passage du moteur PL/SQL au moteur SQL (et retour) à chaque ordre SQL exécuté depuis PL/SQL, ou à chaque appel de fonction PL/SQL depuis SQL. On le réduit en écrivant un seul ordre SQL ensembliste, en utilisant <code>BULK COLLECT</code> et <code>FORALL</code>, et en évitant les fonctions PL/SQL appelées ligne à ligne dans les requêtes.</p></div></details>
-  <details class="qa"><summary>Pourquoi utiliser LIMIT avec BULK COLLECT ?</summary><div><p>Pour borner la mémoire de session : sans <code>LIMIT</code>, tout le résultat est chargé dans la PGA. Une valeur de 100 à 1 000 donne l'essentiel du gain de performance sans risque mémoire.</p></div></details>
-  <details class="qa"><summary>FORALL est-il une boucle ?</summary><div><p>Non. C'est une instruction qui envoie un seul ordre DML au moteur SQL avec un tableau de valeurs liées. Il ne peut contenir qu'un seul DML, pas de logique procédurale.</p></div></details>
-  <details class="qa"><summary>Que se passe-t-il quand une ligne échoue dans un FORALL sans SAVE EXCEPTIONS ?</summary><div><p>Le <code>FORALL</code> s'arrête à cette ligne et lève l'exception. Les lignes traitées avant restent modifiées (rollback au niveau de l'instruction seulement pour la ligne fautive) tant que l'appelant ne fait pas de <code>ROLLBACK</code>. Les lignes suivantes ne sont pas traitées.</p></div></details>
+  <details class="qa"><summary>Pourquoi utiliser LIMIT avec BULK COLLECT, et comment sortir de la boucle ?</summary><div><p>Pour borner la mémoire de session : sans <code>LIMIT</code>, tout le résultat est chargé dans la PGA. Une valeur de 100 à 1 000 donne l'essentiel du gain sans risque mémoire. On sort avec <code>EXIT WHEN l_coll.COUNT = 0</code> juste après le <code>FETCH</code> : <code>%NOTFOUND</code> devient <code>TRUE</code> dès que le dernier lot est incomplet, et le tester à cet endroit ferait perdre ces lignes.</p></div></details>
+  <details class="qa"><summary>FORALL est-il une boucle ?</summary><div><p>Non. C'est une instruction qui envoie un seul ordre DML au moteur SQL avec un tableau de valeurs liées. Il ne peut contenir qu'un seul DML, pas de logique procédurale. <code>SQL%BULK_ROWCOUNT(i)</code> donne ensuite le nombre de lignes touchées par chaque itération.</p></div></details>
+  <details class="qa"><summary>Que se passe-t-il quand une ligne échoue dans un FORALL sans SAVE EXCEPTIONS ?</summary><div><p>Le <code>FORALL</code> s'arrête à cette itération et lève l'exception. Seule l'itération fautive est annulée (rollback au niveau de l'instruction) ; les itérations précédentes restent faites dans la transaction tant que personne ne fait de <code>ROLLBACK</code>, et les suivantes ne sont pas exécutées. Si l'exception n'est pas traitée et remonte jusqu'au client, tout le travail de l'appel est annulé.</p></div></details>
+  <details class="qa"><summary>Comment traiter un gros volume en gardant les lignes valides malgré des erreurs ?</summary><div><p>En PL/SQL : <code>FORALL … SAVE EXCEPTIONS</code>, puis dans le gestionnaire de <code>ORA-24381</code>, parcourir <code>SQL%BULK_EXCEPTIONS</code> (<code>ERROR_INDEX</code> pour retrouver la ligne, <code>ERROR_CODE</code> positif à passer en négatif à <code>SQLERRM</code>) et journaliser. En SQL pur : <code>LOG ERRORS INTO err$_… REJECT LIMIT UNLIMITED</code>, qui garde le message complet et survit au <code>ROLLBACK</code>.</p></div></details>
 </section>

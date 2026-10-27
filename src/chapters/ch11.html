@@ -1,29 +1,71 @@
 <!-- ===================================================== CH 11 ===================================================== -->
-<section class="chapter" id="ch11" data-num="11" data-group="Aller plus loin" data-min="65" data-title="Transactions et SQL dynamique" data-desc="COMMIT, ROLLBACK, SAVEPOINT, transactions autonomes, EXECUTE IMMEDIATE, variables liées et injection SQL." hidden>
+<section class="chapter" id="ch11" data-num="11" data-group="Aller plus loin" data-min="65" data-title="Transactions et SQL dynamique" data-desc="COMMIT, ROLLBACK, SAVEPOINT, isolation et verrous, transactions autonomes, EXECUTE IMMEDIATE, variables liées et injection SQL." hidden>
   <p class="eyebrow">Chapitre 11 · 65 min</p>
   <h1>Transactions et SQL dynamique</h1>
-  <p class="lead">Deux sujets qui touchent à la robustesse : qui décide de valider, comment journaliser une erreur qui sera annulée, et comment construire du SQL à l'exécution sans ouvrir une faille de sécurité.</p>
+  <p class="lead">Deux sujets qui touchent à la robustesse et qui reviennent dans presque tous les entretiens : qui décide de valider, comment journaliser une erreur qui sera annulée, et comment construire du SQL à l'exécution sans ouvrir une faille de sécurité.</p>
   <ul class="goals">
     <li>maîtriser <code>COMMIT</code>, <code>ROLLBACK</code>, <code>SAVEPOINT</code> et savoir qui doit valider ;</li>
-    <li>utiliser une transaction autonome pour la journalisation ;</li>
+    <li>expliquer la lecture cohérente, les niveaux d'isolation et l'interblocage (<code>ORA-00060</code>) ;</li>
+    <li>utiliser une transaction autonome pour la journalisation, et seulement pour ça ;</li>
     <li>écrire du SQL dynamique avec <code>EXECUTE IMMEDIATE</code> et des variables liées ;</li>
     <li>expliquer et empêcher une injection SQL.</li>
   </ul>
 
   <h2>Transactions</h2>
-  <p class="prose">Une transaction commence au premier ordre DML et se termine par <code>COMMIT</code> (validation) ou <code>ROLLBACK</code> (annulation). Les ordres DDL (<code>CREATE</code>, <code>ALTER</code>, <code>DROP</code>, <code>TRUNCATE</code>) font un <strong>COMMIT implicite</strong> avant et après eux. Tant qu'une transaction n'est pas validée, les autres sessions voient les anciennes valeurs (lecture cohérente) et les lignes modifiées sont verrouillées.</p>
+  <p class="prose">Une transaction commence au premier ordre qui modifie des données (<code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>MERGE</code>, <code>SELECT … FOR UPDATE</code>) et se termine par <code>COMMIT</code> (validation) ou <code>ROLLBACK</code> (annulation). Tant qu'elle n'est pas validée, les autres sessions voient les anciennes valeurs (lecture cohérente) et les lignes modifiées sont verrouillées. <code>SAVEPOINT nom</code> pose un repère : <code>ROLLBACK TO SAVEPOINT nom</code> annule le travail fait après ce repère <strong>sans terminer la transaction</strong>.</p>
   <div data-stepper="savepoint"></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Événement</th><th>Effet sur la transaction en cours</th></tr></thead>
+    <tbody>
+      <tr><td><code>COMMIT</code></td><td>Validée : modifications permanentes et visibles, verrous libérés, savepoints effacés</td></tr>
+      <tr><td><code>ROLLBACK</code></td><td>Annulée entièrement, verrous libérés</td></tr>
+      <tr><td><code>ROLLBACK TO SAVEPOINT sp</code></td><td>Annule ce qui suit <code>sp</code>, efface les savepoints posés après lui ; la transaction <strong>continue</strong></td></tr>
+      <tr><td>Ordre DDL (<code>CREATE</code>, <code>ALTER</code>, <code>DROP</code>, <code>TRUNCATE</code>…)</td><td><strong>COMMIT implicite</strong> avant (et après) l'ordre</td></tr>
+      <tr><td>Un ordre DML échoue</td><td>Seul cet ordre est annulé (atomicité au niveau instruction) ; le reste attend toujours</td></tr>
+      <tr><td>Exception non traitée qui remonte au client</td><td>Tout le travail de l'appel est annulé, pas celui fait avant (voir <a href="#ch05">chapitre 05</a>)</td></tr>
+      <tr><td>Fin de session</td><td>Normale : dépend de l'outil (SQL*Plus valide à <code>EXIT</code> par défaut) ; anormale : annulée</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout pitfall"><span class="ct">Piège : le DDL valide tout ce qui précède</span><p>Un <code>EXECUTE IMMEDIATE 'CREATE TABLE …'</code> ou un <code>TRUNCATE</code> au milieu d'un traitement valide silencieusement tous les DML en attente : le <code>ROLLBACK</code> du bloc <code>EXCEPTION</code> n'aura plus rien à annuler. Le COMMIT d'avant a lieu même si le DDL échoue ensuite (table déjà existante, par exemple).</p></div>
   <div class="callout interview"><span class="ct">En entretien : « Qui doit faire le COMMIT ? »</span><p>L'<strong>appelant de plus haut niveau</strong>, celui qui connaît le périmètre de l'unité de travail (le service applicatif, le job batch). Une procédure réutilisable ne doit pas valider elle-même : si elle est appelée au milieu d'un traitement plus large, son <code>COMMIT</code> validerait aussi le travail de l'appelant, qui ne pourrait plus tout annuler.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège : COMMIT dans une boucle</span><p>Valider « toutes les 1 000 lignes » est une fausse bonne idée : c'est plus lent (chaque <code>COMMIT</code> attend l'écriture du journal), un traitement interrompu laisse des données à moitié traitées et difficiles à reprendre, et un curseur ouvert sur des données que tu modifies peut lever <code>ORA-01555: snapshot too old</code>. Sur un curseur <code>FOR UPDATE</code>, c'est <code>ORA-01002</code> (<a href="#ch04">chapitre 04</a>). Valide une fois, à la fin.</p></div>
+
+  <h2>Lecture cohérente, isolation et verrous</h2>
+  <p class="prose">Oracle garantit que chaque requête voit les données <strong>telles qu'elles étaient validées au moment où elle a commencé</strong>, même si d'autres sessions les modifient pendant sa lecture (il reconstitue l'ancienne image grâce à l'undo). Conséquence : <strong>une lecture ne bloque jamais une écriture et une écriture ne bloque jamais une lecture</strong>. Seules deux écritures sur la <strong>même ligne</strong> s'attendent : la seconde patiente jusqu'au <code>COMMIT</code> ou au <code>ROLLBACK</code> de la première.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Niveau d'isolation</th><th>Ce que voit chaque requête</th><th>À retenir</th></tr></thead>
+    <tbody>
+      <tr><td><code>READ COMMITTED</code> (défaut)</td><td>Les données validées au début de <strong>la requête</strong></td><td>Deux requêtes successives peuvent voir des résultats différents</td></tr>
+      <tr><td><code>SERIALIZABLE</code></td><td>Les données validées au début de <strong>la transaction</strong>, plus ses propres modifications</td><td>Modifier une ligne changée et validée par un autre depuis le début : <code>ORA-08177: can't serialize access for this transaction</code></td></tr>
+      <tr><td><code>READ ONLY</code></td><td>Comme <code>SERIALIZABLE</code>, mais aucun DML permis</td><td>Utile pour un rapport cohérent sur plusieurs requêtes</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose">On choisit le niveau avec <code>SET TRANSACTION ISOLATION LEVEL SERIALIZABLE</code> (ou <code>SET TRANSACTION READ ONLY</code>), qui doit être la <strong>première</strong> instruction de la transaction. Oracle n'a pas de lecture « sale » (<code>READ UNCOMMITTED</code>) : une session ne voit jamais les modifications non validées d'une autre.</p>
+  <p class="prose">Un <strong>interblocage</strong> (<em>deadlock</em>) survient quand deux sessions s'attendent mutuellement. Oracle le détecte tout seul en quelques secondes : l'une des sessions reçoit <code>ORA-00060: deadlock detected while waiting for resource</code>, seul son <strong>dernier ordre</strong> est annulé (pas toute sa transaction) et une trace est écrite sur le serveur. Cette session doit ensuite faire <code>ROLLBACK</code> (ou <code>COMMIT</code>) pour libérer l'autre.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+  participant A as Session A
+  participant B as Session B
+  A->>A: UPDATE employes … WHERE emp_id = 102 (verrou 102)
+  B->>B: UPDATE employes … WHERE emp_id = 103 (verrou 103)
+  A->>B: UPDATE … WHERE emp_id = 103 : attend B
+  B->>A: UPDATE … WHERE emp_id = 102 : attend A
+  Note over A,B: cycle d'attente détecté par Oracle
+  A->>A: ORA-00060 : cet UPDATE est annulé, A doit faire ROLLBACK
+    </pre>
+    <p class="cap">Deux sessions qui verrouillent les mêmes lignes dans un ordre différent.</p>
+  </div>
+  <div class="callout tip"><span class="ct">Éviter les interblocages</span><p>Verrouiller les lignes <strong>toujours dans le même ordre</strong> (par exemple par clé croissante), garder les transactions courtes, et verrouiller d'avance avec <code>SELECT … FOR UPDATE NOWAIT</code> ou <code>WAIT n</code> quand on veut échouer vite plutôt qu'attendre (<a href="#ch04">chapitre 04</a>). Une clé étrangère sans index est aussi une cause classique de verrous inattendus sur la table enfant.</p></div>
 
   <h2>Transactions autonomes</h2>
-  <p class="prose"><code>PRAGMA AUTONOMOUS_TRANSACTION</code> fait tourner un sous-programme dans une transaction <strong>indépendante</strong> : il peut valider sans valider le travail de l'appelant, et un <code>ROLLBACK</code> de l'appelant n'annule pas ce qu'il a validé.</p>
+  <p class="prose"><code>PRAGMA AUTONOMOUS_TRANSACTION</code> fait tourner un sous-programme dans une transaction <strong>indépendante</strong> : il peut valider sans valider le travail de l'appelant, et un <code>ROLLBACK</code> de l'appelant n'annule pas ce qu'il a validé. C'est le cas de <code>log_erreur</code>, écrite au <a href="#ch05">chapitre 05</a>.</p>
   <div class="diagram">
     <pre class="mermaid">
 sequenceDiagram
   participant T as Transaction principale
   participant A as log_erreur (autonome)
   T->>T: UPDATE employes (non validé)
-  T->>T: erreur !
   T->>A: appel log_erreur
   Note over A: transaction séparée
   A->>A: INSERT journal_erreurs
@@ -32,68 +74,94 @@ sequenceDiagram
   T->>T: ROLLBACK (annule l'UPDATE)
   Note over T,A: le journal reste, l'UPDATE est annulé
     </pre>
+    <p class="cap">La transaction autonome valide son travail sans toucher à celui de l'appelant.</p>
   </div>
-  <script type="text/plsql" data-title="Démonstration">
+  <script type="text/plsql" data-title="Démonstration (journal_erreurs vide au départ)">
     BEGIN
       UPDATE employes SET salaire = 1 WHERE emp_id = 102;
-      log_erreur('demo');            -- procédure autonome du chapitre 05 (SQLCODE = 0 ici)
-      ROLLBACK;
+      log_erreur('demo');      -- autonome : valide son INSERT (SQLCODE vaut 0 ici, hors exception)
+      ROLLBACK;                -- annule l'UPDATE, pas le journal
     END;
     /
-    SELECT salaire FROM employes WHERE emp_id = 102;        -- 4300 : l'UPDATE est annulé
-    SELECT programme FROM journal_erreurs;                  -- 'demo' : le log est resté
+    DECLARE
+      l_sal employes.salaire%TYPE;
+      l_nb  PLS_INTEGER;
+    BEGIN
+      SELECT salaire INTO l_sal FROM employes WHERE emp_id = 102;
+      SELECT COUNT(*) INTO l_nb FROM journal_erreurs WHERE programme = 'demo';
+      DBMS_OUTPUT.PUT_LINE('Salaire de 102 : ' || l_sal);
+      DBMS_OUTPUT.PUT_LINE('Lignes de journal demo : ' || l_nb);
+    END;
+    /
   </script>
+  <div class="output">Salaire de 102 : 4300
+Lignes de journal demo : 1</div>
   <div class="callout pitfall"><span class="ct">Pièges</span>
     <ul>
-      <li>Un sous-programme autonome doit se terminer par <code>COMMIT</code> ou <code>ROLLBACK</code>, sinon <code>ORA-06519: active autonomous transaction detected and rolled back</code>.</li>
-      <li>Il ne voit <strong>pas</strong> les modifications non validées de l'appelant. S'il essaie de modifier une ligne verrouillée par l'appelant : interblocage avec lui-même (<code>ORA-00060</code>).</li>
-      <li>Ce n'est pas un moyen de contourner la table mutante ou de faire du DML dans une fonction appelée en SQL : réserve-le au journal et à l'audit.</li>
+      <li>Un sous-programme autonome doit se terminer par <code>COMMIT</code> ou <code>ROLLBACK</code>, sinon <code>ORA-06519: active autonomous transaction detected and rolled back</code> : son travail est annulé et l'erreur remonte à l'appelant.</li>
+      <li>Il ne voit <strong>pas</strong> les modifications non validées de l'appelant. S'il essaie de modifier une ligne verrouillée par l'appelant, il attend une transaction qui attend elle-même son retour : interblocage, <code>ORA-00060</code>.</li>
+      <li>Il permet techniquement de faire du DML dans une fonction appelée en SQL ou de lire une table mutante dans un trigger, mais c'est un contournement dangereux : il travaille sur des données qui ne sont pas celles de la transaction, et ce qu'il valide reste même si l'appelant annule. Réserve-le au journal et à l'audit.</li>
     </ul>
   </div>
 
   <h2>SQL dynamique : EXECUTE IMMEDIATE</h2>
-  <p class="prose">Le SQL statique est vérifié à la compilation. Quand la requête n'est connue qu'à l'exécution (nom de table variable, filtres optionnels, DDL), on construit une chaîne et on l'exécute.</p>
+  <p class="prose">Le SQL statique est vérifié à la compilation (existence des tables, des colonnes, des droits). Quand la requête n'est connue qu'à l'exécution (nom de table variable, filtres optionnels, DDL), on construit une chaîne et on l'exécute : les erreurs n'apparaissent alors qu'à l'exécution.</p>
   <script type="text/plsql" data-title="Les formes de EXECUTE IMMEDIATE">
     DECLARE
       l_nb    NUMBER;
       l_nom   employes.nom%TYPE;
-      l_table VARCHAR2(30) := 'EMPLOYES';
+      l_table VARCHAR2(128) := 'EMPLOYES';
       l_rc    SYS_REFCURSOR;
     BEGIN
-      -- 1. DDL : impossible en SQL statique dans PL/SQL
+      -- 1. DDL : impossible en SQL statique dans PL/SQL (et COMMIT implicite !)
       EXECUTE IMMEDIATE 'CREATE TABLE tmp_test (id NUMBER)';
       EXECUTE IMMEDIATE 'DROP TABLE tmp_test PURGE';
 
-      -- 2. Requête mono-ligne avec INTO et variables liées (USING)
+      -- 2. Requête mono-ligne : INTO pour le résultat, USING pour les variables liées
       EXECUTE IMMEDIATE 'SELECT nom FROM employes WHERE emp_id = :id'
         INTO l_nom USING 104;
+      DBMS_OUTPUT.PUT_LINE('104 : ' || l_nom);
 
-      -- 3. DML avec variables liées
+      -- 3. DML : liaison par POSITION (:delta reçoit 10, :d reçoit 30)
       EXECUTE IMMEDIATE 'UPDATE employes SET salaire = salaire + :delta WHERE dept_id = :d'
         USING 10, 30;
-      DBMS_OUTPUT.PUT_LINE(SQL%ROWCOUNT || ' lignes');
+      DBMS_OUTPUT.PUT_LINE(SQL%ROWCOUNT || ' lignes modifiées');
 
-      -- 4. Nom d'objet variable : concaténation obligatoire (pas de bind possible pour un identifiant)
+      -- 4. Nom d'objet variable : concaténation obligatoire, après validation
       EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM ' || DBMS_ASSERT.SQL_OBJECT_NAME(l_table) INTO l_nb;
+      DBMS_OUTPUT.PUT_LINE(l_table || ' : ' || l_nb || ' lignes');
 
       -- 5. Requête multi-lignes : OPEN FOR
-      OPEN l_rc FOR 'SELECT nom FROM employes WHERE salaire > :s' USING 5000;
+      OPEN l_rc FOR 'SELECT nom FROM employes WHERE salaire > :s ORDER BY nom' USING 5000;
       LOOP
         FETCH l_rc INTO l_nom;
         EXIT WHEN l_rc%NOTFOUND;
-        DBMS_OUTPUT.PUT_LINE(l_nom);
+        DBMS_OUTPUT.PUT_LINE('Plus de 5000 : ' || l_nom);
       END LOOP;
       CLOSE l_rc;
       ROLLBACK;
     END;
     /
   </script>
+  <div class="output">104 : Leroy
+4 lignes modifiées
+EMPLOYES : 10 lignes
+Plus de 5000 : Bernard
+Plus de 5000 : Martin
+Plus de 5000 : Moreau</div>
   <div class="callout tip"><span class="ct">Pourquoi des variables liées ?</span>
     <ul>
       <li><strong>Sécurité</strong> : la valeur n'est jamais interprétée comme du SQL, donc pas d'injection.</li>
-      <li><strong>Performance</strong> : <code>WHERE emp_id = :id</code> est analysé une fois et réutilisé ; <code>WHERE emp_id = 104</code>, <code>= 105</code>… provoquent une analyse complète (hard parse) à chaque valeur et saturent le cache partagé.</li>
+      <li><strong>Performance</strong> : <code>WHERE emp_id = :id</code> est analysé une fois et son plan est réutilisé ; <code>WHERE emp_id = 104</code>, <code>= 105</code>… sont autant de requêtes différentes, chacune avec une analyse complète (<em>hard parse</em>), qui saturent le cache partagé.</li>
     </ul>
     <p>En SQL statique dans PL/SQL, chaque variable est automatiquement une variable liée : c'est un avantage gratuit du statique.</p>
+  </div>
+  <div class="callout pitfall"><span class="ct">Pièges du SQL dynamique</span>
+    <ul>
+      <li>Une variable liée remplace une <strong>valeur</strong>, jamais un identifiant : <code>'SELECT COUNT(*) FROM :t'</code> lève <code>ORA-00903: invalid table name</code>.</li>
+      <li>Dans un ordre SQL dynamique, les variables liées sont associées <strong>par position</strong>, pas par nom : <code>:x</code> écrit deux fois demande deux valeurs dans <code>USING</code>.</li>
+      <li>Pas de point-virgule final dans un ordre SQL (<code>'… WHERE emp_id = :id;'</code> provoque une erreur de syntaxe, <code>ORA-00911: invalid character</code> en 19c). Un bloc PL/SQL dynamique, lui, se termine par <code>END;</code>.</li>
+    </ul>
   </div>
 
   <h2>L'injection SQL</h2>
@@ -107,17 +175,31 @@ sequenceDiagram
       RETURN l_nb;
     END;
     /
-    -- Appel normal :   compter_par_poste('DEV')                 -> 2
-    -- Appel malveillant : compter_par_poste('x'' OR ''1''=''1')  -> 10 : la condition est contournée
+    SELECT compter_par_poste('DEV')                  AS normal,
+           compter_par_poste('x'' OR ''1''=''1')     AS injecte
+    FROM dual;
   </script>
-  <p class="prose">La chaîne exécutée devient <code>… WHERE poste = 'x' OR '1'='1'</code>. Sur une requête qui renvoie des données, un attaquant peut ajouter un <code>UNION SELECT</code> sur une autre table. Les défenses :</p>
+  <div class="output">    NORMAL    INJECTE
+---------- ----------
+         2         10</div>
+  <p class="prose">La valeur reçue est <code>x' OR '1'='1</code> et la chaîne exécutée devient <code>… WHERE poste = 'x' OR '1'='1'</code> : la condition est toujours vraie, les 10 employés sont comptés. <code>EXECUTE IMMEDIATE</code> n'exécute qu'un seul ordre, donc on ne peut pas enchaîner <code>; DROP TABLE …</code>, mais un attaquant peut ajouter un <code>UNION SELECT</code> sur une autre table quand la requête renvoie des données, ou glisser une sous-requête pour deviner des informations une réponse à la fois. Les défenses :</p>
   <ol class="prose">
     <li>Préférer le <strong>SQL statique</strong> quand c'est possible (ici, il suffit !).</li>
-    <li>Sinon, <strong>variables liées</strong> pour toute valeur : <code>… WHERE poste = :p' INTO l_nb USING p_poste</code>.</li>
-    <li>Pour un identifiant (table, colonne) qui ne peut pas être lié : valider avec <code>DBMS_ASSERT</code> (<code>SIMPLE_SQL_NAME</code>, <code>SQL_OBJECT_NAME</code>, <code>ENQUOTE_NAME</code>) ou une liste blanche.</li>
-    <li>Principe du moindre privilège : <code>AUTHID</code> adapté, compte applicatif sans droits DDL.</li>
+    <li>Sinon, <strong>variables liées</strong> pour toute valeur : <code>'… WHERE poste = :p' INTO l_nb USING p_poste</code>.</li>
+    <li>Pour un identifiant (table, colonne) qui ne peut pas être lié : valider avec <code>DBMS_ASSERT</code> (<code>SIMPLE_SQL_NAME</code>, <code>SQL_OBJECT_NAME</code> qui vérifie aussi que l'objet existe, <code>ENQUOTE_NAME</code>) ou, mieux, une liste blanche des noms autorisés.</li>
+    <li>Moindre privilège : un compte applicatif sans droits DDL, et attention aux procédures en droits du propriétaire (<code>AUTHID DEFINER</code>, le défaut) : le SQL injecté s'exécute avec les droits du propriétaire du code, pas de l'appelant.</li>
   </ol>
-  <p class="prose">Pour les cas où le nombre de colonnes ou de variables liées est inconnu à la compilation (générateur de requêtes), il existe le package <code>DBMS_SQL</code>, plus verbeux. Depuis 11g, on peut convertir un curseur <code>DBMS_SQL</code> en <code>REF CURSOR</code> et inversement.</p>
+  <script type="text/plsql" data-title="Version corrigée : SQL statique">
+    CREATE OR REPLACE FUNCTION compter_par_poste (p_poste VARCHAR2) RETURN NUMBER IS
+      l_nb NUMBER;
+    BEGIN
+      SELECT COUNT(*) INTO l_nb FROM employes WHERE poste = p_poste;   -- p_poste est une variable liée
+      RETURN l_nb;
+    END;
+    /
+  </script>
+  <div class="callout interview"><span class="ct">En entretien</span><p>Si on te demande « comment éviter l'injection SQL ? », donne les quatre défenses dans cet ordre, en commençant par « je n'utilise le SQL dynamique que s'il est vraiment nécessaire ». Ne propose pas d'échapper les apostrophes à la main avec <code>REPLACE</code> : c'est fragile et ce n'est pas la réponse attendue.</p></div>
+  <p class="prose">Pour les cas où le nombre de colonnes ou de variables liées est inconnu à la compilation (générateur de requêtes, export générique), il existe le package <code>DBMS_SQL</code>, plus verbeux. Depuis 11g, on peut convertir un curseur <code>DBMS_SQL</code> en <code>REF CURSOR</code> (<code>DBMS_SQL.TO_REFCURSOR</code>) et inversement (<code>DBMS_SQL.TO_CURSOR_NUMBER</code>).</p>
 
   <h2>Exercices</h2>
   <div class="ex" data-ex="ch11-e1">
@@ -138,12 +220,37 @@ sequenceDiagram
         /
       </script>
       <details class="sol"><summary>Voir la solution</summary>
-        <p><strong>6</strong> : les 4 d'origine + 50 + 80. <code>ROLLBACK TO sp1</code> annule 60 et 70 (et efface <code>sp2</code>), sans terminer la transaction.</p>
+        <p><strong>6</strong> : les 4 d'origine + 50 + 80. <code>ROLLBACK TO sp1</code> annule 60 et 70 (et efface <code>sp2</code>), sans terminer la transaction : l'INSERT 50 est toujours en attente et le <code>COMMIT</code> final le valide avec 80. Pour revenir à l'état initial : <code>DELETE FROM departements WHERE dept_id IN (50, 80); COMMIT;</code></p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch11-e4">
+    <div class="ex-head"><h4>Exercice 2 · Prédire : DDL et transaction autonome</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>En partant de l'état initial (Garcia, emp_id 109, gagne 1400 ; <code>journal_erreurs</code> vide), quel est le salaire de 109 et combien de lignes contient <code>journal_erreurs</code> après ce bloc ?</p>
+      <script type="text/plsql" data-title="À prédire">
+        BEGIN
+          UPDATE employes SET salaire = salaire + 100 WHERE emp_id = 109;
+          log_erreur('etape 1');                                  -- procédure autonome du chapitre 05
+          EXECUTE IMMEDIATE 'CREATE TABLE tmp_e4 (id NUMBER)';
+          UPDATE employes SET salaire = salaire + 100 WHERE emp_id = 109;
+          ROLLBACK;
+        END;
+        /
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <p>Salaire : <strong>1500</strong>. Journal : <strong>1 ligne</strong>.</p>
+        <ul>
+          <li><code>log_erreur</code> valide sa propre ligne de journal, mais pas le premier <code>UPDATE</code> de l'appelant.</li>
+          <li>Le <code>CREATE TABLE</code> fait un COMMIT implicite : le premier <code>UPDATE</code> (1400 → 1500) est validé à ce moment-là.</li>
+          <li>Le <code>ROLLBACK</code> n'annule que le second <code>UPDATE</code>. La table <code>tmp_e4</code> existe toujours : un DDL ne s'annule pas.</li>
+        </ul>
+        <p class="hint">Nettoyage : <code>DROP TABLE tmp_e4 PURGE;</code> puis relance le script du chapitre 00 pour retrouver les données d'origine.</p>
       </details>
     </div>
   </div>
   <div class="ex" data-ex="ch11-e2">
-    <div class="ex-head"><h4>Exercice 2 · Compter les lignes de n'importe quelle table</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-head"><h4>Exercice 3 · Compter les lignes de n'importe quelle table</h4><span class="lvl l2">moyen</span></div>
     <div class="ex-body">
       <p>Écris <code>nb_lignes(p_table VARCHAR2, p_filtre_col VARCHAR2 DEFAULT NULL, p_filtre_val VARCHAR2 DEFAULT NULL) RETURN NUMBER</code>, sûre face à l'injection. Si un filtre est fourni, compter les lignes où la colonne vaut la valeur.</p>
       <details class="sol"><summary>Voir la solution</summary>
@@ -170,11 +277,12 @@ sequenceDiagram
           SELECT nb_lignes('EMPLOYES', 'POSTE', 'DEV') FROM dual;      -- 2
           SELECT nb_lignes('EMPLOYES; DROP TABLE x') FROM dual;         -- ORA-44002: invalid object name
         </script>
+        <p class="hint"><code>SQL_OBJECT_NAME</code> vérifie que le nom désigne un objet existant, mais accepte n'importe quel objet accessible (une table d'un autre schéma, par exemple). En production, on ajoute une liste blanche des tables autorisées.</p>
       </details>
     </div>
   </div>
   <div class="ex" data-ex="ch11-e3">
-    <div class="ex-head"><h4>Exercice 3 · Recherche multicritère</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-head"><h4>Exercice 4 · Recherche multicritère</h4><span class="lvl l3">difficile</span></div>
     <div class="ex-body">
       <p>Écris une procédure <code>chercher(p_nom, p_dept_id, p_sal_min, p_rc OUT SYS_REFCURSOR)</code> où chaque critère est optionnel (NULL = ignoré). Construis la requête dynamiquement pour n'inclure que les critères fournis, avec des variables liées. Astuce : le nombre de <code>USING</code> doit être fixe, alors utilise l'astuce <code>(1 = 1 OR :b IS NULL)</code> pour les critères absents.</p>
       <details class="sol"><summary>Voir la solution</summary>
@@ -187,18 +295,37 @@ sequenceDiagram
           ) IS
             l_sql VARCHAR2(1000) := 'SELECT emp_id, nom, dept_id, salaire FROM employes WHERE 1 = 1';
           BEGIN
-            l_sql := l_sql || CASE WHEN p_nom     IS NOT NULL THEN ' AND UPPER(nom) LIKE UPPER(:n) || ''%'''
-                                                               ELSE ' AND (1 = 1 OR :n IS NULL)' END;
+            l_sql := l_sql || CASE WHEN p_nom IS NOT NULL THEN ' AND UPPER(nom) LIKE UPPER(:n) || ''%'''
+                                   ELSE ' AND (1 = 1 OR :n IS NULL)' END;
             l_sql := l_sql || CASE WHEN p_dept_id IS NOT NULL THEN ' AND dept_id = :d'
-                                                               ELSE ' AND (1 = 1 OR :d IS NULL)' END;
+                                   ELSE ' AND (1 = 1 OR :d IS NULL)' END;
             l_sql := l_sql || CASE WHEN p_sal_min IS NOT NULL THEN ' AND salaire >= :s'
-                                                               ELSE ' AND (1 = 1 OR :s IS NULL)' END;
+                                   ELSE ' AND (1 = 1 OR :s IS NULL)' END;
             l_sql := l_sql || ' ORDER BY nom';
             OPEN p_rc FOR l_sql USING p_nom, p_dept_id, p_sal_min;
           END;
           /
+          DECLARE
+            l_rc  SYS_REFCURSOR;
+            l_id  employes.emp_id%TYPE;
+            l_nom employes.nom%TYPE;
+            l_dep employes.dept_id%TYPE;
+            l_sal employes.salaire%TYPE;
+          BEGIN
+            chercher(NULL, 20, 4000, l_rc);              -- nom ignoré
+            LOOP
+              FETCH l_rc INTO l_id, l_nom, l_dep, l_sal;
+              EXIT WHEN l_rc%NOTFOUND;
+              DBMS_OUTPUT.PUT_LINE(l_nom || ' ' || l_sal);
+            END LOOP;
+            CLOSE l_rc;
+          END;
+          /
         </script>
-        <p class="hint">L'optimiseur élimine <code>(1 = 1 OR …)</code> : chaque combinaison de critères a son propre plan, optimisé pour les index disponibles, contrairement à une requête statique unique <code>WHERE (p_nom IS NULL OR nom LIKE …)</code>.</p>
+        <div class="output">Bernard 7200
+Leroy 4800
+Petit 4300</div>
+        <p class="hint">L'optimiseur élimine <code>(1 = 1 OR …)</code> : chaque combinaison de critères donne un texte de requête différent, donc son propre plan, optimisé pour les index disponibles, contrairement à une requête statique unique <code>WHERE (p_nom IS NULL OR nom LIKE …)</code>. Et le nombre de textes reste borné (2³ = 8 combinaisons), sans perdre les variables liées.</p>
       </details>
     </div>
   </div>
@@ -207,7 +334,9 @@ sequenceDiagram
   <div data-quiz="ch11"></div>
 
   <h2>Questions d'entretien</h2>
-  <details class="qa"><summary>Qu'est-ce qu'une transaction autonome ? Donne un cas d'usage légitime.</summary><div><p>Un sous-programme marqué <code>PRAGMA AUTONOMOUS_TRANSACTION</code> qui s'exécute dans une transaction indépendante de l'appelant. Cas légitime : journaliser une erreur ou un événement d'audit qui doit être conservé même si la transaction principale est annulée.</p></div></details>
-  <details class="qa"><summary>Différence entre TRUNCATE et DELETE ?</summary><div><p><code>DELETE</code> est un DML : ligne par ligne, génère de l'undo, peut être annulé, déclenche les triggers, accepte un <code>WHERE</code>. <code>TRUNCATE</code> est un DDL : vide la table en réinitialisant ses segments, très rapide, commit implicite, pas de rollback, pas de trigger DML, pas de <code>WHERE</code>. Il échoue si une clé étrangère active référence la table.</p></div></details>
-  <details class="qa"><summary>Quand utiliser DBMS_SQL plutôt qu'EXECUTE IMMEDIATE ?</summary><div><p>Quand la structure de la requête est inconnue à la compilation : nombre de colonnes renvoyées ou nombre de variables liées variable (outil générique d'export, générateur de requêtes). Pour tout le reste, <code>EXECUTE IMMEDIATE</code> et <code>OPEN FOR</code> sont plus simples et plus rapides.</p></div></details>
+  <details class="qa"><summary>Qu'est-ce qu'une transaction autonome ? Donne un cas d'usage légitime.</summary><div><p>Un sous-programme marqué <code>PRAGMA AUTONOMOUS_TRANSACTION</code> qui s'exécute dans une transaction indépendante de l'appelant : il doit se terminer par <code>COMMIT</code> ou <code>ROLLBACK</code> (sinon <code>ORA-06519</code>) et ne voit pas les modifications non validées de l'appelant. Cas légitime : journaliser une erreur ou un événement d'audit qui doit être conservé même si la transaction principale est annulée. Cas à éviter : contourner une table mutante ou faire du DML dans une fonction appelée en SQL.</p></div></details>
+  <details class="qa"><summary>Différence entre TRUNCATE et DELETE ?</summary><div><p><code>DELETE</code> est un DML : ligne par ligne, génère de l'undo, peut être annulé, déclenche les triggers, accepte un <code>WHERE</code>. <code>TRUNCATE</code> est un DDL : vide la table en réinitialisant ses segments, très rapide, commit implicite, pas de rollback, pas de trigger DML, pas de <code>WHERE</code>. Il échoue si une clé étrangère active référence la table (<code>ORA-02266</code>).</p></div></details>
+  <details class="qa"><summary>Qu'est-ce qu'un deadlock et comment Oracle le traite-t-il ?</summary><div><p>Deux sessions qui attendent chacune un verrou tenu par l'autre. Oracle le détecte automatiquement : l'une des sessions reçoit <code>ORA-00060</code>, seul l'ordre en cours est annulé et c'est à l'application de faire <code>ROLLBACK</code> puis éventuellement de réessayer. Prévention : verrouiller dans un ordre constant, transactions courtes, <code>FOR UPDATE NOWAIT</code> ou <code>WAIT n</code>, index sur les clés étrangères. Rappel utile : en Oracle, les lectures ne posent pas de verrou et ne sont jamais bloquées.</p></div></details>
+  <details class="qa"><summary>Comment te protèges-tu de l'injection SQL en PL/SQL ?</summary><div><p>D'abord, SQL statique dès que possible : chaque variable y est liée automatiquement. Ensuite, en dynamique, variables liées (<code>USING</code>) pour toutes les valeurs. Pour les identifiants qu'on ne peut pas lier, <code>DBMS_ASSERT</code> ou une liste blanche. Enfin, moindre privilège et vigilance sur le code en <code>AUTHID DEFINER</code>. Les variables liées améliorent aussi les performances en évitant un <em>hard parse</em> par valeur.</p></div></details>
+  <details class="qa"><summary>Quand utiliser DBMS_SQL plutôt qu'EXECUTE IMMEDIATE ?</summary><div><p>Quand la structure de la requête est inconnue à la compilation : nombre de colonnes renvoyées ou nombre de variables liées variable (outil générique d'export, générateur de requêtes). Pour tout le reste, <code>EXECUTE IMMEDIATE</code> et <code>OPEN FOR</code> sont plus simples et plus lisibles.</p></div></details>
 </section>

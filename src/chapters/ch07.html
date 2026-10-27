@@ -23,6 +23,7 @@ flowchart LR
     </pre>
     <p class="cap">Tout ce qui est déclaré dans la spécification est public. Tout ce qui n'est que dans le corps est privé.</p>
   </div>
+  <p class="prose">Un package se crée en deux ordres distincts : d'abord la <strong>spécification</strong> (<code>CREATE PACKAGE</code>), qui déclare ce que les autres ont le droit d'utiliser, puis le <strong>corps</strong> (<code>CREATE PACKAGE BODY</code>), qui contient le code. La spécification compile sans le corps ; l'inverse est impossible. Les appelants ne voient que la spécification et s'écrivent <code>pkg_rh.augmenter(…)</code>.</p>
   <script type="text/plsql" data-title="Spécification">
     CREATE OR REPLACE PACKAGE pkg_rh AS
       c_smic CONSTANT NUMBER := 1400;                       -- constante publique
@@ -38,7 +39,9 @@ flowchart LR
       );
 
       PROCEDURE augmenter (p_emp_id IN employes.emp_id%TYPE, p_pct IN NUMBER);
-      PROCEDURE augmenter (p_dept_id IN departements.dept_id%TYPE, p_pct IN NUMBER, p_tout_le_dept IN BOOLEAN);  -- surcharge
+      PROCEDURE augmenter (p_dept_id      IN departements.dept_id%TYPE,   -- surcharge : 3 paramètres
+                           p_pct          IN NUMBER,
+                           p_tout_le_dept IN BOOLEAN);
 
       FUNCTION nb_appels RETURN PLS_INTEGER;
     END pkg_rh;
@@ -74,7 +77,9 @@ flowchart LR
         UPDATE employes SET salaire = salaire * (1 + p_pct / 100) WHERE emp_id = p_emp_id;
       END augmenter;
 
-      PROCEDURE augmenter (p_dept_id IN departements.dept_id%TYPE, p_pct IN NUMBER, p_tout_le_dept IN BOOLEAN) IS
+      PROCEDURE augmenter (p_dept_id      IN departements.dept_id%TYPE,
+                           p_pct          IN NUMBER,
+                           p_tout_le_dept IN BOOLEAN) IS
       BEGIN
         g_nb_appels := g_nb_appels + 1;
         IF p_tout_le_dept THEN
@@ -93,6 +98,8 @@ flowchart LR
     END pkg_rh;
     /
   </script>
+  <p class="prose">Les en-têtes des sous-programmes publics doivent être <strong>identiques</strong> dans la spécification et dans le corps (mêmes noms de paramètres, types et modes), sinon le corps ne compile pas (<code>PLS-00323</code>). Une procédure privée comme <code>valider_salaire</code> doit être définie <strong>avant</strong> d'être appelée dans le corps, ou annoncée plus haut par une déclaration anticipée (<em>forward declaration</em>).</p>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Le troisième paramètre de la seconde version d'<code>augmenter</code> est un <code>BOOLEAN</code>. Avant 23ai, ce type n'existe pas en SQL : cette version n'est appelable que depuis du code PL/SQL. Un <code>CALL</code> SQL ne peut pas l'atteindre, et une application cliente passe par un bloc anonyme <code>BEGIN pkg_rh.augmenter(20, 5, TRUE); END;</code>. Depuis 23ai, <code>BOOLEAN</code> est aussi un type SQL. Autre danger de cette surcharge : <code>pkg_rh.augmenter(20, 5)</code> appelle la version à <strong>deux</strong> paramètres, donc augmente l'employé n°20, qui n'existe pas. Aucune erreur, zéro ligne modifiée. Dans du vrai code, un nom explicite (<code>augmenter_dept</code>) serait plus sûr.</p></div>
   <script type="text/plsql" data-title="Utilisation">
     DECLARE
       l_id employes.emp_id%TYPE;
@@ -113,6 +120,7 @@ flowchart LR
 Appels dans cette session : 2
 SMIC : 1400
 Refusé : ORA-20100: Salaire invalide : 900</div>
+  <p class="prose">L'exception publique <code>e_regle_metier</code> est associée au code -20100 par <code>PRAGMA EXCEPTION_INIT</code> : l'appelant l'intercepte par son nom (voir le <a href="#ch05">chapitre 05</a>). La première ligne n'apparaît que si c'est le premier appel de <code>pkg_rh</code> dans ta session. Relance le bloc : elle disparaît et le compteur affiche <strong>5</strong>, car l'embauche refusée avait porté le compteur à 3 avant la validation du salaire, et le <code>ROLLBACK</code> ne l'a pas remis à zéro.</p>
 
   <h2>Pourquoi des packages ?</h2>
   <div class="table-wrap"><table>
@@ -120,20 +128,49 @@ Refusé : ORA-20100: Salaire invalide : 900</div>
     <tbody>
       <tr><td>Encapsulation</td><td>On expose une API stable et on cache les détails (procédures privées, variables).</td></tr>
       <tr><td>Dépendances</td><td>Les appelants dépendent de la <strong>spécification</strong>. Recompiler le corps n'invalide pas les appelants, ce qui évite les cascades d'invalidation.</td></tr>
-      <tr><td>Performance</td><td>Le package entier est chargé en mémoire au premier appel ; les appels suivants n'ont pas à recharger chaque unité.</td></tr>
+      <tr><td>Performance</td><td>Au premier appel, tout le package est chargé dans la mémoire partagée (<em>shared pool</em>) : les appels suivants à ses autres sous-programmes n'ont rien à recharger.</td></tr>
       <tr><td>État de session</td><td>Les variables de package conservent leur valeur entre les appels, pendant toute la session.</td></tr>
-      <tr><td>Surcharge</td><td>Plusieurs sous-programmes de même nom avec des paramètres différents (en nombre, ordre ou famille de types).</td></tr>
+      <tr><td>Surcharge</td><td>Plusieurs sous-programmes de même nom avec des paramètres différents (en nombre, ordre ou famille de types). Impossible pour des procédures autonomes.</td></tr>
       <tr><td>Sécurité</td><td>Un seul <code>GRANT EXECUTE ON pkg_rh</code> donne accès à toute l'API, sans accès direct aux tables.</td></tr>
     </tbody>
   </table></div>
 
-  <h2>L'état de package et ORA-04068</h2>
-  <p class="prose">Chaque session a <strong>sa propre copie</strong> des variables de package : deux utilisateurs ne partagent jamais <code>g_nb_appels</code>. Si un package possède des variables (il a un « état ») et qu'on recompile son corps pendant que des sessions l'utilisent, ces sessions reçoivent au prochain appel :</p>
+  <h2>L'état de package et la section d'initialisation</h2>
+  <p class="prose">Les variables, constantes et curseurs déclarés au niveau du package (dans la spécification ou dans le corps, hors de tout sous-programme) forment son <strong>état</strong>. Chaque session a <strong>sa propre copie</strong> de cet état, en mémoire de session (UGA) : deux utilisateurs ne partagent jamais <code>g_nb_appels</code>. L'état est créé à la <strong>première référence</strong> au package dans la session (appel d'un sous-programme ou lecture d'une variable publique) : Oracle initialise les variables, puis exécute une fois la section d'initialisation. Il dure ensuite jusqu'à la fin de la session.</p>
+  <div data-stepper="pkg-etat"></div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Une variable de package n'est <strong>pas</strong> partagée entre sessions et n'est pas transactionnelle : un <code>ROLLBACK</code> ne remet pas <code>g_nb_appels</code> à sa valeur précédente. Avec un pool de connexions côté application, une variable de package peut « fuiter » d'un utilisateur web à l'autre qui réutilise la même session : réinitialise-la explicitement, ou ne t'en sers pas pour des données propres à un utilisateur.</p></div>
+
+  <h2>ORA-04068 : l'état a été jeté</h2>
+  <p class="prose">Si un package a un état et qu'on recompile son corps (un déploiement, par exemple) pendant que des sessions l'ont déjà instancié, chacune de ces sessions reçoit une erreur à son prochain appel. Voici ce qu'affiche SQL*Plus en 19c pour un <code>EXEC pkg_rh.augmenter(103, 5)</code> (23ai formule les messages un peu différemment et ajoute un lien d'aide) :</p>
   <div class="output" style="margin:0 0 16px;border-top:1px solid var(--code-line);border-radius:var(--radius)">ORA-04068: existing state of packages has been discarded
-ORA-04061: existing state of package body "RH.PKG_RH" has been invalidated</div>
-  <p class="prose">Le second appel fonctionne, car l'état a été réinitialisé. Les remèdes : éviter les variables globales quand ce n'est pas nécessaire (un package sans état n'a pas ce problème), déplacer les constantes littérales… ou utiliser le <em>Edition-Based Redefinition</em> pour les déploiements sans interruption.</p>
-  <div class="callout pitfall"><span class="ct">Piège</span><p>Une variable de package n'est <strong>pas</strong> partagée entre sessions et n'est pas transactionnelle : un <code>ROLLBACK</code> ne remet pas <code>g_nb_appels</code> à sa valeur précédente. Avec un pool de connexions côté application, une variable de package peut « fuiter » d'un utilisateur web à l'autre qui réutilise la même session.</p></div>
-  <div class="callout tip"><span class="ct">Astuce</span><p>Les mots-clés <code>ACCESSIBLE BY (pkg_api)</code> (12c) limitent les unités autorisées à appeler un package : utile pour un package « interne » qui ne doit être appelé que par la couche API.</p></div>
+ORA-04061: existing state of package body "RH.PKG_RH" has been invalidated
+ORA-04065: not executed, altered or dropped package body "RH.PKG_RH"
+ORA-06508: PL/SQL: could not find program unit being called: "RH.PKG_RH"
+ORA-06512: at line 1</div>
+  <p class="prose">(<code>RH</code> est ici le schéma propriétaire.) L'appel suivant fonctionne, car le package est instancié à nouveau, mais les valeurs des variables sont perdues. Les remèdes :</p>
+  <ul class="prose">
+    <li>éviter les variables globales quand elles ne servent à rien : un package <strong>sans état</strong> n'a pas ce problème. Depuis 11.2.0.2, un package dont les seuls éléments d'état sont des constantes connues à la compilation (valeur littérale ou expression statique, comme <code>c_smic</code>) est traité comme sans état. Ce n'est pas le cas de <code>pkg_rh</code>, à cause de <code>g_nb_appels</code> ;</li>
+    <li>isoler l'état dans un petit package séparé, rarement modifié, et garder la logique dans un package sans état qu'on peut redéployer ;</li>
+    <li>côté application, intercepter ORA-04068 et relancer l'appel une fois ;</li>
+    <li>pour des déploiements sans interruption : l'<em>Edition-Based Redefinition</em> (11gR2).</li>
+  </ul>
+  <div class="callout interview"><span class="ct">En entretien</span><p>« Recompiler un corps de package n'invalide pas les appelants » et « recompiler un corps de package avec état provoque ORA-04068 dans les sessions qui l'utilisent » sont deux affirmations vraies en même temps. La première concerne les <strong>dépendances</strong> (statut VALID/INVALID des objets), la seconde l'<strong>état en mémoire</strong> des sessions. Savoir les distinguer fait bonne impression.</p></div>
+  <div class="callout tip"><span class="ct">Astuce</span><p>La clause <code>ACCESSIBLE BY (PACKAGE pkg_api)</code> (12c) limite les unités autorisées à appeler un package : utile pour un package « interne » qui ne doit être appelé que par la couche API. Tout autre appel est refusé à la compilation (<code>PLS-00904</code>).</p></div>
+
+  <h2>Packages fournis par Oracle</h2>
+  <p class="prose">Oracle livre des centaines de packages <code>DBMS_*</code> et <code>UTL_*</code>. Ceux-ci reviennent souvent en entretien :</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Package</th><th>Usage typique</th></tr></thead>
+    <tbody>
+      <tr><td><code>DBMS_OUTPUT</code></td><td><code>PUT_LINE</code> écrit dans un tampon que le client (SQL*Plus, SQL Developer) affiche à la fin de l'appel. Outil de mise au point, pas de journalisation en production.</td></tr>
+      <tr><td><code>DBMS_UTILITY</code></td><td><code>FORMAT_ERROR_BACKTRACE</code>, <code>FORMAT_CALL_STACK</code>, <code>GET_TIME</code> (chronométrage en centièmes de seconde). Voir le <a href="#ch05">chapitre 05</a>.</td></tr>
+      <tr><td><code>DBMS_SESSION</code></td><td><code>RESET_PACKAGE</code> (jette l'état de tous les packages de la session), <code>SET_IDENTIFIER</code> (identifier l'utilisateur applicatif).</td></tr>
+      <tr><td><code>DBMS_SQL</code></td><td>SQL dynamique quand le nombre de colonnes ou de variables n'est connu qu'à l'exécution (<a href="#ch11">chapitre 11</a>).</td></tr>
+      <tr><td><code>DBMS_LOB</code></td><td>Manipuler des <code>CLOB</code> et <code>BLOB</code> : longueur, extraction, ajout.</td></tr>
+      <tr><td><code>UTL_FILE</code></td><td>Lire et écrire des fichiers texte <strong>sur le serveur de base</strong> (pas sur le poste client), dans un objet <code>DIRECTORY</code> sur lequel on a reçu les droits.</td></tr>
+      <tr><td><code>DBMS_SCHEDULER</code></td><td>Créer et planifier des traitements (<code>CREATE_JOB</code>). Remplace l'ancien <code>DBMS_JOB</code>.</td></tr>
+    </tbody>
+  </table></div>
 
   <h2>Exercices</h2>
   <div class="ex" data-ex="ch07-e1">
@@ -166,9 +203,10 @@ ORA-04061: existing state of package body "RH.PKG_RH" has been invalidated</div>
             END jours_ouvres;
           END pkg_dates;
           /
+          -- Du lundi 26/10/2026 au dimanche 08/11/2026 : deux semaines complètes
           SELECT pkg_dates.jours_ouvres(DATE '2026-10-26', DATE '2026-11-08') FROM dual;  -- 10
         </script>
-        <p class="hint"><code>TO_CHAR(d, 'D')</code> dépend du paramètre <code>NLS_TERRITORY</code> (le 1er jour de la semaine n'est pas le même en France et aux États-Unis) : piège classique. L'écart avec <code>TRUNC(d, 'IW')</code> est fiable partout. La fonction privée renvoie un <code>BOOLEAN</code> : possible car elle n'est appelée que depuis PL/SQL.</p>
+        <p class="hint"><code>TO_CHAR(d, 'D')</code> dépend du paramètre <code>NLS_TERRITORY</code> (le 1er jour de la semaine n'est pas le même en France et aux États-Unis) : piège classique. L'écart avec <code>TRUNC(d, 'IW')</code> est fiable partout. La fonction privée renvoie un <code>BOOLEAN</code> : possible car elle n'est appelée que depuis PL/SQL. La fonction publique, elle, est appelée depuis SQL : elle renvoie un type numérique. Les jours fériés (le 11 novembre par exemple) ne sont pas gérés : il faudrait une table de jours fériés.</p>
       </details>
     </div>
   </div>
@@ -206,7 +244,13 @@ ORA-04061: existing state of package body "RH.PKG_RH" has been invalidated</div>
             RETURN l_total;
           END masse_salariale;
         </script>
-        <p class="hint">La contrainte de clé étrangère <code>manager_id</code> bloquerait de toute façon la suppression (ORA-02292), mais le contrôle explicite donne un message métier compréhensible.</p>
+        <script type="text/plsql" data-title="Test">
+          SELECT pkg_rh.masse_salariale(20) FROM dual;   -- 21600
+          SELECT pkg_rh.masse_salariale FROM dual;       -- 46900 (paramètre omis : toute l'entreprise)
+          SELECT pkg_rh.masse_salariale(40) FROM dual;   -- 0 (département vide, grâce au NVL)
+          EXEC pkg_rh.licencier(101);   -- ORA-20101: Employé 101 manage encore 3 personne(s)
+        </script>
+        <p class="hint">La contrainte de clé étrangère <code>manager_id</code> bloquerait de toute façon la suppression (ORA-02292), mais le contrôle explicite donne un message métier compréhensible. La suppression de l'historique avant celle de l'employé est nécessaire pour la même raison (clé étrangère de <code>historique_salaires</code>). Sans <code>NVL</code>, le département 40 renverrait NULL.</p>
       </details>
     </div>
   </div>
@@ -241,8 +285,33 @@ ORA-04061: existing state of package body "RH.PKG_RH" has been invalidated</div>
             END vider;
           END;
           /
+          SELECT pkg_cache_dept.nom(20) FROM dual;   -- Informatique (lu en base, puis gardé en cache)
         </script>
-        <p>Risques : le cache est <strong>par session</strong> (chaque session le remplit, la mémoire PGA est multipliée par le nombre de sessions) et il n'est <strong>jamais invalidé</strong> si quelqu'un renomme un département. <code>RESULT_CACHE</code> est partagé entre sessions et invalidé automatiquement quand la table change.</p>
+        <p>Risques : le cache est <strong>par session</strong> (chaque session le remplit, la mémoire de session, l'UGA, est multipliée par le nombre de sessions) et il n'est <strong>jamais invalidé</strong> si quelqu'un renomme un département. <code>RESULT_CACHE</code> est partagé entre sessions et invalidé automatiquement quand la table change.</p>
+      </details>
+    </div>
+  </div>
+
+  <div class="ex" data-ex="ch07-e4">
+    <div class="ex-head"><h4>Exercice 4 · Surcharger jours_ouvres</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Ajoute à <code>pkg_dates</code> une seconde version de <code>jours_ouvres</code> qui accepte deux chaînes au format <code>c_format</code>, de sorte que <code>pkg_dates.jours_ouvres('26/10/2026', '08/11/2026')</code> renvoie aussi 10. Ne duplique pas la logique de calcul. Pourquoi cette surcharge est-elle autorisée ?</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Ajout dans la spécification">
+          FUNCTION jours_ouvres (p_debut IN VARCHAR2, p_fin IN VARCHAR2) RETURN PLS_INTEGER;
+        </script>
+        <script type="text/plsql" data-title="Ajout dans le corps (après la version DATE)">
+          FUNCTION jours_ouvres (p_debut IN VARCHAR2, p_fin IN VARCHAR2) RETURN PLS_INTEGER IS
+          BEGIN
+            -- TO_DATE renvoie un DATE : c'est la version DATE qui est appelée ici
+            RETURN jours_ouvres(TO_DATE(p_debut, c_format), TO_DATE(p_fin, c_format));
+          END jours_ouvres;
+        </script>
+        <script type="text/plsql" data-title="Test">
+          SELECT pkg_dates.jours_ouvres('26/10/2026', '08/11/2026') FROM dual;              -- 10
+          SELECT pkg_dates.jours_ouvres(DATE '2026-10-26', DATE '2026-11-08') FROM dual;  -- 10
+        </script>
+        <p class="hint">Les deux versions ont le même nombre de paramètres, mais <code>VARCHAR2</code> et <code>DATE</code> appartiennent à des familles de types différentes : Oracle choisit la version d'après le type des arguments. Avec une chaîne qui ne respecte pas le format, <code>TO_DATE</code> lève une erreur (par exemple <code>ORA-01843</code> pour un mois invalide) : c'est voulu, une date mal formée ne doit pas donner un résultat silencieux.</p>
       </details>
     </div>
   </div>
@@ -252,7 +321,8 @@ ORA-04061: existing state of package body "RH.PKG_RH" has been invalidated</div>
 
   <h2>Questions d'entretien</h2>
   <details class="qa"><summary>Peut-on avoir une spécification sans corps ?</summary><div><p>Oui, si elle ne déclare que des éléments sans implémentation : constantes, types, exceptions, variables. C'est courant pour un package de constantes ou de types partagés. Le corps devient obligatoire dès qu'on déclare un sous-programme ou un curseur avec requête cachée.</p></div></details>
-  <details class="qa"><summary>Si je modifie le corps d'un package, les procédures qui l'appellent deviennent-elles invalides ?</summary><div><p>Non. Elles dépendent de la spécification. Seule une modification de la spécification invalide les appelants. C'est un des principaux arguments en faveur des packages.</p></div></details>
-  <details class="qa"><summary>Quelles sont les règles de la surcharge ?</summary><div><p>Les versions doivent différer par le nombre, l'ordre ou la famille de types des paramètres. Différer uniquement par le mode (<code>IN</code>/<code>OUT</code>), par le nom du paramètre, par le type de retour, ou par des sous-types de la même famille (<code>NUMBER</code> / <code>INTEGER</code>) provoque une erreur d'appel ambigu (<code>PLS-00307</code>). On peut surcharger des sous-programmes de package ou locaux, pas des procédures autonomes.</p></div></details>
-  <details class="qa"><summary>Qu'est-ce que SERIALLY_REUSABLE ?</summary><div><p>Un <code>PRAGMA</code> qui limite la durée de vie de l'état d'un package à un seul appel serveur au lieu de toute la session. Il économise de la mémoire dans les systèmes avec beaucoup de sessions, mais le package ne peut alors pas être utilisé depuis SQL ni depuis un trigger.</p></div></details>
+  <details class="qa"><summary>Si je modifie le corps d'un package, les procédures qui l'appellent deviennent-elles invalides ?</summary><div><p>Non. Elles dépendent de la spécification, pas du corps. Seule une modification de la spécification peut invalider les appelants, et depuis 11g le suivi fin des dépendances (<em>fine-grained dependency tracking</em>) les épargne si les éléments qu'ils utilisent n'ont pas changé, par exemple quand on ajoute un nouveau sous-programme à la spécification. C'est un des principaux arguments en faveur des packages.</p></div></details>
+  <details class="qa"><summary>Quelles sont les règles de la surcharge ?</summary><div><p>Les versions doivent différer par le nombre, l'ordre ou la famille de types des paramètres. Différer uniquement par le mode (<code>IN</code>/<code>OUT</code>), par le type de retour, ou par des sous-types de la même famille (<code>NUMBER</code> / <code>INTEGER</code>) rend l'appel ambigu : <code>PLS-00307: too many declarations of 'X' match this call</code>. Si seuls les noms des paramètres diffèrent, l'appel positionnel est ambigu mais la notation nommée (<code>p(x =&gt; 1)</code>) permet de choisir. On peut surcharger des sous-programmes de package ou locaux, pas des procédures autonomes.</p></div></details>
+  <details class="qa"><summary>Qu'est-ce que SERIALLY_REUSABLE ?</summary><div><p>Un <code>PRAGMA</code> qui limite la durée de vie de l'état d'un package à un seul appel serveur au lieu de toute la session. Il économise de la mémoire dans les systèmes avec beaucoup de sessions, mais le package ne peut alors pas être utilisé depuis un trigger ni depuis une fonction appelée par une requête SQL.</p></div></details>
+  <details class="qa"><summary>Après un déploiement, des utilisateurs reçoivent ORA-04068 une fois, puis tout refonctionne. Que s'est-il passé ?</summary><div><p>Le corps d'un package avec état (variables globales) a été recompilé alors que leurs sessions l'avaient déjà instancié. Oracle jette l'état de ces sessions : le premier appel échoue, le suivant réinstancie le package et fonctionne, mais les valeurs des variables sont perdues. Pour l'éviter : packages sans état, état isolé dans un package séparé, relance automatique côté application, ou <em>Edition-Based Redefinition</em>.</p></div></details>
 </section>

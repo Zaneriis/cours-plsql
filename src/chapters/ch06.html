@@ -1,13 +1,15 @@
 <!-- ===================================================== CH 06 ===================================================== -->
-<section class="chapter" id="ch06" data-num="06" data-group="Programmation modulaire" data-min="70" data-title="Procédures et fonctions" data-desc="Paramètres IN, OUT, IN OUT, notations d'appel, fonctions appelées en SQL, NOCOPY, droits d'exécution." hidden>
+<section class="chapter" id="ch06" data-num="06" data-group="Programmation modulaire" data-min="70" data-title="Procédures et fonctions" data-desc="Paramètres IN, OUT, IN OUT, notations d'appel, fonctions appelées en SQL, NOCOPY, sous-programmes locaux, droits d'exécution." hidden>
   <p class="eyebrow">Chapitre 06 · 70 min</p>
   <h1>Procédures et fonctions</h1>
-  <p class="lead">Les sous-programmes stockés sont la brique de base de toute application PL/SQL. Ce chapitre couvre aussi les questions plus pointues : <code>NOCOPY</code>, fonctions déterministes, cache de résultats, droits de l'appelant.</p>
+  <p class="lead">Les sous-programmes stockés sont la brique de base de toute application PL/SQL. En entretien, on te demandera rarement la syntaxe de <code>CREATE PROCEDURE</code> ; on te demandera plutôt ce que devient un paramètre <code>OUT</code> après une erreur, pourquoi une fonction lève <code>ORA-14551</code> dans un <code>SELECT</code>, ou pourquoi une procédure ne compile pas alors que la requête marche dans SQL Developer. Ce chapitre couvre ces questions.</p>
   <ul class="goals">
-    <li>créer procédures et fonctions avec les trois modes de paramètres ;</li>
+    <li>créer procédures et fonctions avec les trois modes de paramètres, et savoir comment chacun est transmis ;</li>
     <li>appeler en notation positionnelle, nommée ou mixte ;</li>
-    <li>connaître les règles d'une fonction appelée depuis une requête SQL ;</li>
-    <li>expliquer <code>AUTHID DEFINER</code> et <code>AUTHID CURRENT_USER</code>.</li>
+    <li>connaître les règles et le coût d'une fonction appelée depuis une requête SQL ;</li>
+    <li>écrire des sous-programmes locaux, récursifs, avec déclaration anticipée ;</li>
+    <li>suivre l'état d'un sous-programme dans le dictionnaire et le recompiler ;</li>
+    <li>expliquer <code>AUTHID DEFINER</code> et <code>AUTHID CURRENT_USER</code>, et le piège des rôles.</li>
   </ul>
 
   <h2>Procédure ou fonction ?</h2>
@@ -15,16 +17,16 @@
     <thead><tr><th></th><th>Procédure</th><th>Fonction</th></tr></thead>
     <tbody>
       <tr><td>But</td><td>Réaliser une action</td><td>Calculer et renvoyer une valeur</td></tr>
-      <tr><td>Valeur de retour</td><td>Aucune (éventuellement via paramètres <code>OUT</code>)</td><td>Exactement une, via <code>RETURN</code> (obligatoire)</td></tr>
-      <tr><td>Appel</td><td>Instruction : <code>maj_salaire(102);</code></td><td>Dans une expression : <code>l_x := anciennete(102);</code></td></tr>
-      <tr><td>Utilisable dans un SELECT</td><td>Non</td><td>Oui, sous conditions</td></tr>
+      <tr><td>Valeur de retour</td><td>Aucune (éventuellement via paramètres <code>OUT</code>)</td><td>Exactement une, via <code>RETURN expr</code> (obligatoire)</td></tr>
+      <tr><td>Appel</td><td>Instruction : <code>augmenter_salaire(102, 10, l_sal);</code></td><td>Dans une expression : <code>l_x := anciennete(102);</code></td></tr>
+      <tr><td>Utilisable dans un <code>SELECT</code></td><td>Non</td><td>Oui, sous conditions</td></tr>
     </tbody>
   </table></div>
 
   <script type="text/plsql" data-title="Créer une procédure et une fonction">
     CREATE OR REPLACE PROCEDURE augmenter_salaire (
-      p_emp_id   IN employes.emp_id%TYPE,
-      p_pct      IN NUMBER DEFAULT 5,                -- valeur par défaut
+      p_emp_id   IN  employes.emp_id%TYPE,
+      p_pct      IN  NUMBER DEFAULT 5,               -- valeur par défaut
       p_nouveau  OUT employes.salaire%TYPE           -- valeur rendue à l'appelant
     ) IS
     BEGIN
@@ -49,32 +51,66 @@
     END anciennete;
     /
   </script>
+  <p class="prose">Quelques règles de déclaration : un paramètre se type <strong>sans taille</strong> (<code>VARCHAR2</code>, pas <code>VARCHAR2(30)</code>, sinon <code>PLS-00103</code>) ou par ancrage <code>%TYPE</code>, ce qui suit la définition de la colonne. Une fonction dont l'exécution atteint le <code>END</code> sans passer par un <code>RETURN</code> lève <code>ORA-06503: PL/SQL: Function returned without value</code>. Dans une procédure, <code>RETURN;</code> sans valeur sert seulement à sortir immédiatement.</p>
+  <div class="callout tip"><span class="ct">Astuce : CREATE OR REPLACE plutôt que DROP + CREATE</span><p><code>CREATE OR REPLACE</code> conserve les privilèges accordés (<code>GRANT EXECUTE</code>) et les synonymes qui pointent vers l'objet. Un <code>DROP</code> suivi d'un <code>CREATE</code> perd les privilèges. Depuis SQL*Plus ou SQLcl, si la compilation échoue (« Warning: Procedure created with compilation errors »), <code>SHOW ERRORS</code> affiche les erreurs ; elles sont aussi dans la vue <code>USER_ERRORS</code>.</p></div>
 
   <h2>Les modes de paramètres</h2>
   <div class="table-wrap"><table>
-    <thead><tr><th>Mode</th><th>Dans le sous-programme</th><th>Ce que l'appelant passe</th><th>Passage</th></tr></thead>
+    <thead><tr><th>Mode</th><th>Dans le sous-programme</th><th>Ce que l'appelant passe</th><th>Transmission</th></tr></thead>
     <tbody>
-      <tr><td><code>IN</code> (défaut)</td><td>Lecture seule, comme une constante</td><td>Valeur, expression ou variable</td><td>Par référence</td></tr>
-      <tr><td><code>OUT</code></td><td>Démarre à <code>NULL</code>, on l'affecte</td><td>Une variable obligatoirement</td><td>Par copie (valeur recopiée à la sortie normale)</td></tr>
-      <tr><td><code>IN OUT</code></td><td>Lecture et écriture</td><td>Une variable initialisée</td><td>Par copie, aller et retour</td></tr>
+      <tr><td><code>IN</code> (défaut)</td><td>Lecture seule, comme une constante : l'affecter provoque <code>PLS-00363</code></td><td>Valeur littérale, expression ou variable</td><td>Par référence</td></tr>
+      <tr><td><code>OUT</code></td><td>Démarre à <code>NULL</code> quelle que soit la valeur de la variable de l'appelant ; on l'affecte</td><td>Une variable obligatoirement (pas un littéral ni une expression)</td><td>Par valeur : recopié vers l'appelant à la fin normale</td></tr>
+      <tr><td><code>IN OUT</code></td><td>Lecture et écriture, part de la valeur de l'appelant</td><td>Une variable obligatoirement</td><td>Par valeur : copie à l'entrée et copie au retour</td></tr>
     </tbody>
   </table></div>
-  <div class="callout pitfall"><span class="ct">Piège : OUT et exceptions</span><p>Les paramètres <code>OUT</code> et <code>IN OUT</code> sont recopiés vers l'appelant <strong>seulement si le sous-programme se termine normalement</strong>. Si une exception non traitée en sort, la variable de l'appelant garde son ancienne valeur. Avec l'indication <code>NOCOPY</code>, le passage se fait par référence : plus rapide pour de grosses collections, mais la variable peut alors rester à moitié modifiée en cas d'erreur.</p></div>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+  subgraph APP["Appelant"]
+    A1["l_id = 102"]
+    A2["l_sal = 4300"]
+    A3["l_cpt = 3"]
+  end
+  subgraph SP["Sous-programme"]
+    F1["p_id IN<br/>lecture seule"]
+    F2["p_sal OUT<br/>démarre à NULL"]
+    F3["p_cpt IN OUT<br/>copie locale de 3"]
+  end
+  A1 -- "référence" --> F1
+  A3 -- "copie à l'entrée" --> F3
+  F2 -. "copie au retour,<br/>seulement si fin normale" .-> A2
+  F3 -. "copie au retour,<br/>seulement si fin normale" .-> A3
+    </pre>
+    <p class="cap">Sans <code>NOCOPY</code>, un <code>OUT</code> ou <code>IN OUT</code> travaille sur une copie locale. La recopie vers l'appelant n'a lieu que si le sous-programme se termine sans exception.</p>
+  </div>
+  <div class="callout pitfall"><span class="ct">Piège : OUT et exceptions</span><p>Les paramètres <code>OUT</code> et <code>IN OUT</code> sont recopiés vers l'appelant <strong>seulement si le sous-programme se termine normalement</strong>. Si une exception non traitée en sort, la variable de l'appelant garde sa valeur d'avant l'appel. Attention aussi à l'inverse : la variable passée en <code>OUT</code> est écrasée par <code>NULL</code> si la procédure se termine normalement sans jamais affecter le paramètre.</p></div>
+  <p class="prose">L'animation suivante déroule deux appels d'une procédure locale : le premier réussit, le second échoue après avoir affecté son paramètre <code>OUT</code>.</p>
+  <div data-stepper="ch06-out-exception"></div>
+
+  <h3>NOCOPY : passer par référence</h3>
+  <p class="prose">Recopier une collection de 100 000 éléments à l'entrée et à la sortie coûte cher. L'indication <code>NOCOPY</code> demande au compilateur de passer le paramètre <code>OUT</code> ou <code>IN OUT</code> par référence : <code>p_tab IN OUT NOCOPY t_tab</code>. Deux conséquences :</p>
+  <ul class="prose">
+    <li>ce n'est qu'une <strong>indication</strong> : Oracle peut l'ignorer, par exemple si le paramètre formel a une contrainte (<code>NOT NULL</code>, <code>NUMBER(8,2)</code>), si une conversion de type est nécessaire ou si l'appel est distant ;</li>
+    <li>si elle est appliquée, la variable de l'appelant est modifiée au fil de l'exécution : en cas d'exception, elle peut rester <strong>à moitié modifiée</strong>.</li>
+  </ul>
+  <p class="prose">Réserve-la aux grosses collections et aux LOB, là où le gain est mesurable, et ne fais jamais dépendre la logique de l'appelant du fait qu'elle soit appliquée ou non.</p>
 
   <h3>Notations d'appel</h3>
   <script type="text/plsql" data-title="Positionnelle, nommée, mixte">
     DECLARE
       l_sal employes.salaire%TYPE;
     BEGIN
-      augmenter_salaire(102, 10, l_sal);                                      -- positionnelle
-      augmenter_salaire(p_emp_id => 103, p_nouveau => l_sal);                 -- nommée, p_pct prend sa valeur par défaut
-      augmenter_salaire(104, p_nouveau => l_sal, p_pct => 2);                 -- mixte : positionnels d'abord
+      augmenter_salaire(102, 10, l_sal);                         -- positionnelle
+      augmenter_salaire(p_emp_id => 103, p_nouveau => l_sal);    -- nommée : p_pct vaut 5 par défaut
+      augmenter_salaire(104, p_nouveau => l_sal, p_pct => 2);    -- mixte : positionnels d'abord
       DBMS_OUTPUT.PUT_LINE('Dernier salaire : ' || l_sal);
       ROLLBACK;
     END;
     /
   </script>
-  <div class="callout tip"><span class="ct">Astuce</span><p>La notation nommée rend l'appel lisible et robuste : on peut ajouter un paramètre avec valeur par défaut à la fin d'une procédure sans casser les appels existants. En SQL*Plus, <code>EXEC proc(...)</code> est un raccourci pour <code>BEGIN proc(...); END;</code>.</p></div>
+  <div class="output">Dernier salaire : 4896</div>
+  <p class="prose">Le troisième appel augmente Leroy (4 800) de 2 % : 4 896. En notation mixte, les paramètres positionnels viennent d'abord ; l'inverse, <code>augmenter_salaire(p_emp_id =&gt; 102, 10, l_sal)</code>, est refusé à la compilation (<code>PLS-00312: a positional parameter association may not follow a named association</code>).</p>
+  <div class="callout tip"><span class="ct">Astuce</span><p>La notation nommée rend l'appel lisible et robuste : on peut ajouter un paramètre avec valeur par défaut à la fin d'une procédure sans casser les appels existants, et l'ordre des paramètres nommés est libre. Elle est aussi acceptée dans un appel de fonction depuis SQL depuis 11g. En SQL*Plus, <code>EXEC proc(...)</code> est un raccourci pour <code>BEGIN proc(...); END;</code>.</p></div>
 
   <h2>Fonctions appelées depuis SQL</h2>
   <script type="text/plsql" data-title="Une fonction dans une requête">
@@ -83,36 +119,40 @@
      WHERE anciennete(emp_id) >= 5
      ORDER BY annees DESC;
   </script>
+  <p class="prose">Le résultat dépend de la date du jour. Exécutée le 27 octobre 2026, la requête renvoie 7 lignes, de Martin (11 ans) à Durand (5 ans) ; Laurent (4 ans), Michel (3) et Garcia (2) sont exclus.</p>
   <p class="prose">Pour être appelée depuis SQL, une fonction doit :</p>
   <ul class="prose">
-    <li>n'utiliser que des types SQL en paramètres et retour (pas de <code>BOOLEAN</code> avant 23ai, pas de record PL/SQL, pas de tableau associatif) ;</li>
-    <li>avoir uniquement des paramètres <code>IN</code> ;</li>
-    <li>ne pas faire de DML ni de <code>COMMIT</code> quand elle est appelée depuis un <code>SELECT</code> (sinon <code>ORA-14551</code>), sauf à être en transaction autonome ;</li>
-    <li>ne pas modifier la table interrogée par l'ordre qui l'appelle (sinon erreur de table mutante <code>ORA-04091</code>).</li>
+    <li>être stockée (autonome ou publique dans un package) ou déclarée dans la clause <code>WITH</code> de la requête ;</li>
+    <li>n'utiliser que des types SQL en paramètres et retour : pas de record PL/SQL, pas de tableau associatif, pas de <code>BOOLEAN</code> avant 23ai (où <code>BOOLEAN</code> devient un type SQL) ;</li>
+    <li>n'avoir que des paramètres <code>IN</code> ;</li>
+    <li>appelée depuis un <code>SELECT</code>, ne faire aucun DML (<code>ORA-14551: cannot perform a DML operation inside a query</code>) ni <code>COMMIT</code>, <code>ROLLBACK</code> ou DDL (<code>ORA-14552</code>), sauf si elle est en transaction autonome (<a href="#ch05">chapitre 05</a>) ;</li>
+    <li>appelée depuis un <code>INSERT</code>, <code>UPDATE</code> ou <code>DELETE</code>, ne pas lire ni modifier la table que cet ordre modifie (table mutante <code>ORA-04091</code>, détaillée au <a href="#ch10">chapitre 10</a>).</li>
   </ul>
-  <div class="callout pitfall"><span class="ct">Piège de performance</span><p>Dans la requête ci-dessus, <code>anciennete</code> fait un <code>SELECT</code> pour chaque ligne, et elle est appelée deux fois par ligne. Chaque appel est un changement de contexte SQL → PL/SQL → SQL. Sur un million de lignes, c'est catastrophique : la logique doit être écrite en SQL pur (<code>TRUNC(MONTHS_BETWEEN(SYSDATE, date_embauche)/12)</code>) ou la fonction doit recevoir la date plutôt que l'identifiant.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège de performance</span><p>Dans la requête ci-dessus, <code>anciennete</code> est appelée pour chaque ligne dans le <code>WHERE</code>, puis de nouveau pour chaque ligne retenue dans le <code>SELECT</code>, et chaque appel exécute un <code>SELECT</code>. Chaque appel est un changement de contexte SQL → PL/SQL, et chaque requête interne un changement PL/SQL → SQL. Sur un million de lignes, c'est catastrophique : écris la logique en SQL pur (<code>TRUNC(MONTHS_BETWEEN(SYSDATE, date_embauche) / 12)</code>), ou fais recevoir à la fonction la date plutôt que l'identifiant.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège : NO_DATA_FOUND avalé par SQL</span><p>Si une fonction appelée depuis une requête laisse échapper <code>NO_DATA_FOUND</code>, SQL ne lève pas d'erreur : la fonction renvoie simplement <code>NULL</code> pour cette ligne. <code>SELECT anciennete(999) FROM dual</code> affiche une valeur vide, alors que <code>l_x := anciennete(999)</code> en PL/SQL lève <code>ORA-01403</code>. Autre subtilité : la requête interne de la fonction prend sa propre image des données à chaque appel ; elle ne partage pas la lecture cohérente de la requête qui l'appelle.</p></div>
   <p class="prose">Options pour accélérer une fonction appelée en SQL :</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Option</th><th>Effet</th></tr></thead>
     <tbody>
-      <tr><td><code>DETERMINISTIC</code></td><td>Promesse : mêmes entrées, même résultat. Oracle peut réutiliser le résultat au sein d'une requête ; obligatoire pour un index sur fonction. C'est toi qui garantis la promesse.</td></tr>
-      <tr><td><code>RESULT_CACHE</code></td><td>Résultats mis en cache en mémoire partagée (SGA) pour toutes les sessions, invalidés automatiquement si les tables lues changent.</td></tr>
-      <tr><td><code>PRAGMA UDF</code> (12c)</td><td>Compile la fonction pour réduire le coût de l'appel depuis SQL.</td></tr>
-      <tr><td><code>WITH FUNCTION</code> (12c)</td><td>Fonction déclarée dans la clause <code>WITH</code> de la requête elle-même.</td></tr>
-      <tr><td>Sous-requête scalaire</td><td><code>(SELECT f(x) FROM dual)</code> active un cache par valeur d'entrée pendant la requête.</td></tr>
+      <tr><td><code>DETERMINISTIC</code></td><td>Promesse : mêmes entrées, même résultat. Oracle peut éviter des appels répétés avec les mêmes arguments pendant l'exécution de la requête (cache limité à chaque appel de fetch, dans la session). Obligatoire pour l'utiliser dans un index sur fonction ou une colonne virtuelle. Oracle ne vérifie pas la promesse : c'est toi qui la garantis.</td></tr>
+      <tr><td><code>RESULT_CACHE</code> (11g)</td><td>Résultats stockés dans le cache de résultats de la SGA, partagés entre toutes les sessions, invalidés automatiquement quand une transaction qui modifie une table lue par la fonction est validée.</td></tr>
+      <tr><td><code>PRAGMA UDF</code> (12c)</td><td>Compile la fonction de façon à réduire le coût de l'appel depuis SQL ; en contrepartie, l'appel depuis PL/SQL peut être un peu plus lent.</td></tr>
+      <tr><td><code>WITH FUNCTION</code> (12c)</td><td>Fonction déclarée dans la clause <code>WITH</code> de la requête elle-même, sans objet stocké.</td></tr>
+      <tr><td>Sous-requête scalaire</td><td><code>(SELECT f(x) FROM dual)</code> active le cache de sous-requête scalaire : un appel par valeur distincte de <code>x</code> (dans la limite de la taille du cache).</td></tr>
     </tbody>
   </table></div>
   <script type="text/plsql" data-title="Fonction déterministe et fonction en cache">
-    CREATE OR REPLACE FUNCTION annees_depuis (p_date IN DATE) RETURN NUMBER
-      DETERMINISTIC
+    CREATE OR REPLACE FUNCTION annees_depuis (p_debut IN DATE, p_fin IN DATE)
+      RETURN NUMBER
+      DETERMINISTIC                    -- vrai : le résultat ne dépend que des deux paramètres
     IS
       PRAGMA UDF;
     BEGIN
-      RETURN TRUNC(MONTHS_BETWEEN(SYSDATE, p_date) / 12);
-    END;
+      RETURN TRUNC(MONTHS_BETWEEN(p_fin, p_debut) / 12);
+    END annees_depuis;
     /
-    -- (strictement, SYSDATE rend la fonction non déterministe d'un jour à l'autre :
-    --  acceptable pour une requête, à ne PAS utiliser dans un index sur fonction)
+
+    SELECT nom, annees_depuis(date_embauche, SYSDATE) AS annees FROM employes;
 
     CREATE OR REPLACE FUNCTION nom_departement (p_dept_id IN NUMBER) RETURN VARCHAR2
       RESULT_CACHE
@@ -123,36 +163,104 @@
       RETURN l_nom;
     EXCEPTION
       WHEN NO_DATA_FOUND THEN RETURN NULL;
-    END;
+    END nom_departement;
     /
   </script>
+  <div class="callout pitfall"><span class="ct">Piège : un faux DETERMINISTIC</span><p>Une fonction qui lit <code>SYSDATE</code>, une table, une variable de package ou un paramètre NLS n'est <strong>pas</strong> déterministe. La déclarer <code>DETERMINISTIC</code> compile sans erreur, mais un index sur fonction bâti dessus renverra des résultats faux le jour où la valeur change. C'est pour cela que <code>annees_depuis</code> reçoit la date de fin en paramètre au lieu de lire <code>SYSDATE</code> elle-même. De même, <code>RESULT_CACHE</code> ne convient pas à une fonction qui dépend de l'état de la session.</p></div>
 
   <h2>Sous-programmes locaux</h2>
-  <p class="prose">On peut déclarer une procédure ou une fonction à la fin de la section déclarative d'un bloc ou d'un autre sous-programme. Elle n'est visible que là : idéal pour factoriser sans polluer le schéma.</p>
+  <p class="prose">On peut déclarer une procédure ou une fonction dans la section déclarative d'un bloc ou d'un autre sous-programme, <strong>après</strong> les variables, curseurs et types. Elle n'est visible que là : idéal pour factoriser sans créer d'objet dans le schéma.</p>
   <script type="text/plsql" data-title="Fonction locale">
     DECLARE
+      l_nb PLS_INTEGER := 0;                         -- les variables d'abord
       FUNCTION formater (p_nom VARCHAR2, p_sal NUMBER) RETURN VARCHAR2 IS
       BEGIN
-        RETURN RPAD(p_nom, 10, '.') || LPAD(TO_CHAR(p_sal, 'FM99G990'), 8);
+        RETURN RPAD(p_nom, 10, '.') || LPAD(p_sal, 6);
       END formater;
     BEGIN
-      FOR r IN (SELECT nom, salaire FROM employes WHERE dept_id = 10 OR poste = 'DBA') LOOP
+      FOR r IN (SELECT nom, salaire FROM employes
+                 WHERE dept_id = 10 OR poste = 'DBA' ORDER BY emp_id) LOOP
         DBMS_OUTPUT.PUT_LINE(formater(r.nom, r.salaire));
+        l_nb := l_nb + 1;
       END LOOP;
+      DBMS_OUTPUT.PUT_LINE(l_nb || ' lignes');
     END;
     /
   </script>
+  <div class="output">Martin....  9500
+Leroy.....  4800
+2 lignes</div>
+
+  <h3>Déclaration anticipée et récursivité</h3>
+  <p class="prose">Un sous-programme local doit être déclaré avant d'être appelé. Quand deux sous-programmes s'appellent mutuellement, on écrit d'abord la <strong>déclaration anticipée</strong> (<em>forward declaration</em>) de l'un : son en-tête seul, terminé par un point-virgule. Un sous-programme peut aussi s'appeler lui-même (récursivité) : il faut alors une condition d'arrêt, sinon l'exécution finit par une erreur d'épuisement de la mémoire.</p>
+  <script type="text/plsql" data-title="Organigramme par récursivité croisée">
+    DECLARE
+      PROCEDURE afficher_equipe (p_mgr_id NUMBER, p_niveau PLS_INTEGER);   -- déclaration anticipée
+
+      PROCEDURE afficher (p_emp_id NUMBER, p_niveau PLS_INTEGER) IS
+        l_nom employes.nom%TYPE;
+      BEGIN
+        SELECT nom INTO l_nom FROM employes WHERE emp_id = p_emp_id;
+        DBMS_OUTPUT.PUT_LINE(LPAD(' ', 2 * p_niveau) || l_nom);
+        afficher_equipe(p_emp_id, p_niveau + 1);     -- appelle une procédure définie plus bas
+      END afficher;
+
+      PROCEDURE afficher_equipe (p_mgr_id NUMBER, p_niveau PLS_INTEGER) IS
+      BEGIN
+        FOR r IN (SELECT emp_id FROM employes WHERE manager_id = p_mgr_id ORDER BY emp_id) LOOP
+          afficher(r.emp_id, p_niveau);              -- arrêt naturel : un employé sans équipe
+        END LOOP;
+      END afficher_equipe;
+    BEGIN
+      afficher(101, 0);
+    END;
+    /
+  </script>
+  <div class="output">Bernard
+  Petit
+    Garcia
+  Durand
+  Leroy</div>
+  <p class="prose">Pour un vrai organigramme, une requête hiérarchique (<code>CONNECT BY</code> ou <code>WITH</code> récursif) fait le même travail en un seul ordre SQL, sans une requête par employé. La récursivité PL/SQL reste utile pour parcourir des structures en mémoire (collections, documents JSON).</p>
+  <div class="callout tip"><span class="ct">Surcharge locale</span><p>Deux sous-programmes locaux du même bloc peuvent porter le même nom s'ils diffèrent par le nombre ou la famille de types de leurs paramètres, par exemple <code>formater(p_sal NUMBER)</code> et <code>formater(p_date DATE)</code>. C'est impossible pour des procédures autonomes du schéma (un seul objet par nom). Les règles de la surcharge sont détaillées avec les packages au <a href="#ch07">chapitre 07</a>.</p></div>
+
+  <h2>Dans le dictionnaire : état, arguments, recompilation</h2>
+  <p class="prose">Un sous-programme stocké est un objet du schéma, avec un statut <code>VALID</code> ou <code>INVALID</code>. Il devient <code>INVALID</code> quand un objet dont il dépend change d'une façon qui le concerne : depuis 11g, le suivi des dépendances est fin, et ajouter une colonne à <code>employes</code> n'invalide pas <code>augmenter_salaire</code>, alors que modifier le type de <code>salaire</code> l'invalide.</p>
+  <script type="text/plsql" data-title="Interroger le dictionnaire et recompiler">
+    -- Statut des objets
+    SELECT object_name, object_type, status
+      FROM user_objects
+     WHERE object_name IN ('AUGMENTER_SALAIRE', 'ANCIENNETE');
+
+    -- Signature : un argument par ligne ; pour une fonction, POSITION = 0 décrit le retour
+    SELECT argument_name, position, in_out, data_type, defaulted
+      FROM user_arguments
+     WHERE object_name = 'AUGMENTER_SALAIRE'
+     ORDER BY position;
+
+    -- Code source et erreurs de compilation
+    SELECT line, text FROM user_source  WHERE name = 'ANCIENNETE' ORDER BY line;
+    SELECT line, position, text FROM user_errors WHERE name = 'ANCIENNETE';
+
+    -- Recompilation explicite
+    ALTER PROCEDURE augmenter_salaire COMPILE;
+    ALTER FUNCTION anciennete COMPILE;
+  </script>
+  <p class="prose">Pour <code>augmenter_salaire</code>, <code>USER_ARGUMENTS</code> renvoie trois lignes : <code>P_EMP_ID</code> (position 1, <code>IN</code>), <code>P_PCT</code> (position 2, <code>IN</code>, <code>DEFAULTED = 'Y'</code>) et <code>P_NOUVEAU</code> (position 3, <code>OUT</code>), toutes de type <code>NUMBER</code>. Les noms sont en majuscules dans le dictionnaire.</p>
+  <div class="callout interview"><span class="ct">En entretien : « Que se passe-t-il quand on appelle un objet INVALID ? »</span><p>Oracle tente de le recompiler automatiquement au moment de l'appel. Si la recompilation réussit, l'appel se déroule normalement (une seule fois plus lent). Si elle échoue, l'appel lève <code>ORA-06550</code> avec <code>PLS-00905: object … is invalid</code>. Après une livraison, on recompile tout le schéma d'un coup avec <code>DBMS_UTILITY.COMPILE_SCHEMA</code> ou <code>UTL_RECOMP</code> plutôt que d'attendre les premiers appels.</p></div>
 
   <h2>Droits d'exécution : DEFINER ou CURRENT_USER</h2>
   <div class="table-wrap"><table>
     <thead><tr><th></th><th><code>AUTHID DEFINER</code> (défaut)</th><th><code>AUTHID CURRENT_USER</code></th></tr></thead>
     <tbody>
-      <tr><td>S'exécute avec les droits de</td><td>Le propriétaire du code</td><td>L'utilisateur qui appelle</td></tr>
-      <tr><td>Les noms de tables désignent</td><td>Les objets du schéma propriétaire</td><td>Les objets du schéma de l'appelant</td></tr>
+      <tr><td>S'exécute avec les privilèges de</td><td>Le propriétaire du code</td><td>L'utilisateur qui appelle</td></tr>
+      <tr><td>Les noms non qualifiés dans le SQL désignent</td><td>Les objets du schéma propriétaire</td><td>Les objets du schéma de l'appelant (résolus à l'exécution)</td></tr>
+      <tr><td>Rôles pris en compte à l'exécution</td><td>Aucun : seuls les privilèges accordés directement au propriétaire</td><td>Les rôles actifs de l'appelant</td></tr>
       <tr><td>Usage</td><td>API sécurisée : on donne <code>EXECUTE</code> sans donner l'accès aux tables</td><td>Utilitaires génériques qui doivent travailler sur les données de chaque utilisateur</td></tr>
     </tbody>
   </table></div>
-  <div class="callout pitfall"><span class="ct">Piège classique</span><p>Dans une unité <code>AUTHID DEFINER</code>, les <strong>rôles</strong> du propriétaire sont désactivés. Une requête qui fonctionne dans SQL Developer (grâce à un privilège obtenu via un rôle) échoue à la compilation de la procédure avec <code>ORA-00942: table or view does not exist</code>. Solution : accorder le privilège directement à l'utilisateur.</p></div>
+  <p class="prose">La clause se place dans l'en-tête, avant <code>IS</code> / <code>AS</code> : <code>CREATE OR REPLACE FUNCTION f (…) RETURN NUMBER AUTHID CURRENT_USER IS …</code>. Elle concerne surtout le SQL dynamique, détaillé au <a href="#ch11">chapitre 11</a> : un utilitaire qui compte les lignes d'une table dont le nom est passé en paramètre doit compter celles de la table de l'appelant, pas celles du propriétaire.</p>
+  <div class="callout pitfall"><span class="ct">Piège classique : les rôles</span><p>Les privilèges obtenus via un <strong>rôle</strong> ne servent pas à compiler du PL/SQL stocké, et ne sont jamais actifs dans une unité <code>AUTHID DEFINER</code>. Une requête qui fonctionne dans SQL Developer (grâce à un <code>SELECT</code> obtenu via un rôle) échoue à la compilation de la procédure avec <code>PL/SQL: ORA-00942: table or view does not exist</code>. Solution : accorder le privilège directement au propriétaire (<code>GRANT SELECT ON rh.employes TO appli</code>). Depuis 12c, on peut aussi accorder un rôle à l'unité PL/SQL elle-même (<code>GRANT role TO PROCEDURE …</code>).</p></div>
 
   <h2>Exercices</h2>
   <div class="ex" data-ex="ch06-e1">
@@ -173,11 +281,13 @@
                 WHEN p_poste LIKE 'DIR%'    THEN 0.05
                 ELSE 0.03
               END, 2);
-          END;
+          END calcul_prime;
           /
-          SELECT nom, poste, salaire, calcul_prime(salaire, poste) AS prime FROM employes;
+          SELECT nom, poste, salaire, calcul_prime(salaire, poste) AS prime
+            FROM employes
+           ORDER BY emp_id;
         </script>
-        <p class="hint">Ici <code>DETERMINISTIC</code> est légitime : le résultat ne dépend que des paramètres.</p>
+        <p class="hint">Ici <code>DETERMINISTIC</code> est légitime : le résultat ne dépend que des paramètres. Quelques valeurs : Martin (DG) 285, Bernard (DIR_IT) 360, Simon (COMMERCIAL) 310, Garcia (STAGIAIRE) 42. Le DG n'a pas de poste en <code>DIR%</code> : il tombe dans le cas 3 %.</p>
       </details>
     </div>
   </div>
@@ -205,8 +315,8 @@
                WHERE dept_id = p_dept_id
                ORDER BY salaire DESC
                FETCH FIRST 1 ROW ONLY;              -- 12c+ ; évite TOO_MANY_ROWS en cas d'égalité
-            END IF;
-          END;
+            END IF;                                 -- sinon p_max_nom reste NULL (valeur initiale d'un OUT)
+          END stats_dept;
           /
 
           DECLARE
@@ -214,10 +324,15 @@
           BEGIN
             stats_dept(p_dept_id => 20, p_nb => l_nb, p_moy => l_moy, p_max_nom => l_nom);
             DBMS_OUTPUT.PUT_LINE(l_nb || ' employés, moyenne ' || l_moy || ', top : ' || l_nom);
+            stats_dept(p_dept_id => 40, p_nb => l_nb, p_moy => l_moy, p_max_nom => l_nom);
+            DBMS_OUTPUT.PUT_LINE(l_nb || ' employé, moyenne ' || NVL(TO_CHAR(l_moy), '-')
+                                 || ', top : ' || NVL(l_nom, '-'));
           END;
           /
         </script>
-        <div class="output">5 employés, moyenne 4320, top : Bernard</div>
+        <div class="output">5 employés, moyenne 4320, top : Bernard
+0 employé, moyenne -, top : -</div>
+        <p class="hint">Au second appel, <code>l_nom</code> contenait « Bernard » ; il repasse à NULL parce qu'un paramètre <code>OUT</code> démarre à NULL et que la procédure s'est terminée normalement.</p>
       </details>
     </div>
   </div>
@@ -228,9 +343,78 @@
       <details class="sol"><summary>Voir la solution</summary>
         <ol>
           <li><strong>Supprimer la fonction</strong> : une jointure <code>JOIN departements d ON d.dept_id = e.dept_id</code>. Zéro changement de contexte, l'optimiseur choisit le meilleur plan. C'est la réponse attendue.</li>
-          <li>Si la fonction doit rester (règle métier partagée) : lui passer <code>e.dept_id</code> plutôt que <code>emp_id</code> pour supprimer une lecture, la déclarer <code>RESULT_CACHE</code> (peu de départements, beaucoup d'appels identiques).</li>
-          <li>L'appeler via une sous-requête scalaire <code>(SELECT nom_dept(e.dept_id) FROM dual)</code> pour profiter du cache de sous-requête scalaire, et ajouter <code>PRAGMA UDF</code>.</li>
+          <li>Si la fonction doit rester (règle métier partagée) : lui passer <code>e.dept_id</code> plutôt que <code>emp_id</code> pour supprimer une lecture, et la déclarer <code>RESULT_CACHE</code> comme <code>nom_departement</code> (peu de départements, beaucoup d'appels identiques).</li>
+          <li>L'appeler via une sous-requête scalaire <code>(SELECT nom_departement(e.dept_id) FROM dual)</code> pour profiter du cache de sous-requête scalaire (4 valeurs distinctes, donc 4 appels), et ajouter <code>PRAGMA UDF</code>.</li>
         </ol>
+        <p class="hint">Ne propose pas <code>DETERMINISTIC</code> ici : la fonction lit une table, son résultat peut changer.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch06-e4">
+    <div class="ex-head"><h4>Exercice 4 · Prédire l'affichage</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Sans l'exécuter, donne les trois lignes affichées par ce bloc.</p>
+      <script type="text/plsql" data-title="Énoncé">
+        DECLARE
+          l_total NUMBER := 100;
+          PROCEDURE ajouter (p_total IN OUT NUMBER, p_montant IN NUMBER) IS
+          BEGIN
+            p_total := p_total + p_montant;
+            IF p_total > 150 THEN
+              RAISE_APPLICATION_ERROR(-20002, 'Plafond dépassé');
+            END IF;
+          END ajouter;
+        BEGIN
+          ajouter(l_total, 30);
+          DBMS_OUTPUT.PUT_LINE('A : ' || l_total);
+          BEGIN
+            ajouter(l_total, 40);
+          EXCEPTION
+            WHEN OTHERS THEN DBMS_OUTPUT.PUT_LINE('B : ' || l_total);
+          END;
+          ajouter(l_total, 5);
+          DBMS_OUTPUT.PUT_LINE('C : ' || l_total);
+        END;
+        /
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <div class="output">A : 130
+B : 130
+C : 135</div>
+        <p>Le premier appel se termine normalement : 130 est recopié. Le deuxième calcule 170 dans sa copie locale puis lève une exception : la copie n'est pas recopiée, <code>l_total</code> vaut toujours 130 dans le gestionnaire. Le bloc interne a traité l'erreur, l'exécution continue : 130 + 5 = 135. Avec <code>IN OUT NOCOPY</code>, la ligne B pourrait afficher 170, ce qui montre pourquoi on ne doit pas compter sur l'un ou l'autre comportement.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch06-e5">
+    <div class="ex-head"><h4>Exercice 5 · Chaîne hiérarchique récursive</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Dans un bloc anonyme, écris une fonction locale <strong>récursive</strong> <code>chaine(p_emp_id)</code> qui renvoie le nom de l'employé suivi de ceux de ses managers successifs, séparés par <code>&gt;</code>. Un identifiant inconnu doit renvoyer <code>'?'</code>. Affiche le résultat pour 109, 100 et 999.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            FUNCTION chaine (p_emp_id employes.emp_id%TYPE) RETURN VARCHAR2 IS
+              l_nom employes.nom%TYPE;
+              l_mgr employes.manager_id%TYPE;
+            BEGIN
+              SELECT nom, manager_id INTO l_nom, l_mgr FROM employes WHERE emp_id = p_emp_id;
+              IF l_mgr IS NULL THEN
+                RETURN l_nom;                          -- condition d'arrêt : le sommet
+              END IF;
+              RETURN l_nom || ' > ' || chaine(l_mgr);  -- appel récursif
+            EXCEPTION
+              WHEN NO_DATA_FOUND THEN RETURN '?';
+            END chaine;
+          BEGIN
+            DBMS_OUTPUT.PUT_LINE(chaine(109));
+            DBMS_OUTPUT.PUT_LINE(chaine(100));
+            DBMS_OUTPUT.PUT_LINE(chaine(999));
+          END;
+          /
+        </script>
+        <div class="output">Garcia > Petit > Bernard > Martin
+Martin
+?</div>
+        <p class="hint">En SQL, la même chaîne s'obtient en un seul ordre avec <code>SYS_CONNECT_BY_PATH</code> ou un <code>WITH</code> récursif. Si les données contenaient un cycle (un employé manager de son propre manager), cette fonction bouclerait jusqu'à épuisement de la mémoire : un compteur de profondeur maximale est une bonne protection.</p>
       </details>
     </div>
   </div>
@@ -239,8 +423,9 @@
   <div data-quiz="ch06"></div>
 
   <h2>Questions d'entretien</h2>
-  <details class="qa"><summary>Peut-on faire un COMMIT dans une fonction ?</summary><div><p>Techniquement oui si elle est appelée depuis PL/SQL, mais c'est une mauvaise pratique : une fonction calcule, elle ne doit pas avoir d'effet de bord. Appelée depuis un <code>SELECT</code>, un DML ou un <code>COMMIT</code> lève <code>ORA-14551</code> (sauf transaction autonome, réservée à des cas comme la journalisation).</p></div></details>
-  <details class="qa"><summary>Qu'est-ce que NOCOPY ?</summary><div><p>Une indication au compilateur pour passer un paramètre <code>OUT</code> ou <code>IN OUT</code> par référence au lieu de par copie. Utile pour les grosses collections ou les LOB. C'est une indication, pas une garantie, et en cas d'exception les modifications partielles sont visibles chez l'appelant.</p></div></details>
-  <details class="qa"><summary>Différence entre DETERMINISTIC et RESULT_CACHE ?</summary><div><p><code>DETERMINISTIC</code> est une promesse faite à l'optimiseur que la fonction renvoie toujours la même chose pour les mêmes entrées ; le bénéfice est limité à la requête en cours et c'est requis pour un index sur fonction. <code>RESULT_CACHE</code> stocke réellement les résultats en mémoire partagée entre sessions et les invalide quand les tables sources changent.</p></div></details>
-  <details class="qa"><summary>Une procédure peut-elle renvoyer une valeur ?</summary><div><p>Pas avec <code>RETURN valeur</code> (un <code>RETURN;</code> seul y sert à sortir immédiatement). Elle renvoie des valeurs via des paramètres <code>OUT</code> / <code>IN OUT</code>, ou un <code>SYS_REFCURSOR</code> en <code>OUT</code> pour un jeu de résultats.</p></div></details>
+  <details class="qa"><summary>Peut-on faire un COMMIT dans une fonction ?</summary><div><p>Techniquement oui si elle est appelée depuis PL/SQL, mais c'est une mauvaise pratique : une fonction calcule, elle ne doit pas avoir d'effet de bord, et elle validerait la transaction de l'appelant sans qu'il le sache. Appelée depuis un <code>SELECT</code>, un DML lève <code>ORA-14551</code> et un <code>COMMIT</code> lève <code>ORA-14552</code>. La seule exception est la transaction autonome, réservée à des cas comme la journalisation.</p></div></details>
+  <details class="qa"><summary>Que devient un paramètre OUT si la procédure lève une exception ?</summary><div><p>Sans <code>NOCOPY</code>, rien n'est recopié : la variable de l'appelant garde sa valeur d'avant l'appel, même si la procédure avait déjà affecté le paramètre. Avec <code>NOCOPY</code>, le passage peut se faire par référence et la variable peut rester partiellement modifiée ; comme <code>NOCOPY</code> n'est qu'une indication, l'appelant ne doit compter sur aucun des deux comportements.</p></div></details>
+  <details class="qa"><summary>Différence entre DETERMINISTIC et RESULT_CACHE ?</summary><div><p><code>DETERMINISTIC</code> est une promesse faite à Oracle que la fonction renvoie toujours la même chose pour les mêmes entrées ; Oracle ne la vérifie pas, le bénéfice se limite à l'exécution de la requête dans la session, et c'est requis pour un index sur fonction. <code>RESULT_CACHE</code> stocke réellement les résultats dans la SGA, les partage entre sessions et les invalide quand les tables lues sont modifiées et validées : il convient à une fonction qui lit des données rarement modifiées.</p></div></details>
+  <details class="qa"><summary>Ma procédure ne compile pas (ORA-00942) alors que la requête marche dans SQL Developer. Pourquoi ?</summary><div><p>Le privilège sur la table est obtenu via un rôle. Les rôles ne sont pas pris en compte pour compiler du PL/SQL stocké ni à l'exécution d'une unité <code>AUTHID DEFINER</code>. Il faut un <code>GRANT</code> direct au propriétaire de la procédure. En <code>AUTHID CURRENT_USER</code>, les rôles de l'appelant sont actifs à l'exécution, mais la compilation demande toujours des privilèges directs (ou du SQL dynamique).</p></div></details>
+  <details class="qa"><summary>Une procédure peut-elle renvoyer une valeur ?</summary><div><p>Pas avec <code>RETURN valeur</code> (un <code>RETURN;</code> seul y sert à sortir immédiatement). Elle renvoie des valeurs via des paramètres <code>OUT</code> / <code>IN OUT</code>, ou un <code>SYS_REFCURSOR</code> en <code>OUT</code> pour un jeu de résultats. Si elle doit être utilisable dans une expression ou dans un <code>SELECT</code>, c'est une fonction qu'il faut écrire.</p></div></details>
 </section>

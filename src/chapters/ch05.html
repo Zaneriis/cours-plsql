@@ -1,17 +1,18 @@
 <!-- ===================================================== CH 05 ===================================================== -->
-<section class="chapter" id="ch05" data-num="05" data-group="Accès aux données" data-min="70" data-title="Gestion des exceptions" data-desc="Exceptions prédéfinies et personnalisées, EXCEPTION_INIT, RAISE_APPLICATION_ERROR, propagation et journalisation." hidden>
+<section class="chapter" id="ch05" data-num="05" data-group="Accès aux données" data-min="70" data-title="Gestion des exceptions" data-desc="Exceptions prédéfinies et personnalisées, EXCEPTION_INIT, RAISE_APPLICATION_ERROR, propagation, transactions et journalisation." hidden>
   <p class="eyebrow">Chapitre 05 · 70 min</p>
   <h1>Gestion des exceptions</h1>
-  <p class="lead">Tous les entretiens PL/SQL y passent. Il faut savoir lever, intercepter, transformer et journaliser une erreur, et surtout expliquer où elle va quand personne ne l'intercepte.</p>
+  <p class="lead">Tous les entretiens PL/SQL y passent. Il faut savoir lever, intercepter, transformer et journaliser une erreur, et surtout expliquer où elle va quand personne ne l'intercepte et ce qu'elle annule au passage.</p>
   <ul class="goals">
     <li>intercepter les exceptions prédéfinies et en déclarer de nouvelles ;</li>
     <li>nommer une erreur Oracle avec <code>PRAGMA EXCEPTION_INIT</code> ;</li>
-    <li>lever une erreur métier avec <code>RAISE_APPLICATION_ERROR</code> ;</li>
-    <li>prédire la propagation d'une exception et ce qui est annulé.</li>
+    <li>lever une erreur métier avec <code>RAISE_APPLICATION_ERROR</code> et re-lever avec <code>RAISE</code> ;</li>
+    <li>prédire la propagation d'une exception et ce qui est annulé dans la transaction ;</li>
+    <li>journaliser une erreur avec sa ligne d'origine.</li>
   </ul>
 
   <h2>La section EXCEPTION</h2>
-  <p class="prose">Quand une erreur survient dans la section <code>BEGIN</code>, l'exécution saute immédiatement à la section <code>EXCEPTION</code> du même bloc. Oracle cherche le premier gestionnaire <code>WHEN</code> qui correspond ; <code>WHEN OTHERS</code> attrape tout ce qui reste et doit être le dernier.</p>
+  <p class="prose">Quand une erreur survient dans la section <code>BEGIN</code>, l'exécution quitte immédiatement l'instruction en cours et saute à la section <code>EXCEPTION</code> du même bloc. Oracle cherche le gestionnaire <code>WHEN</code> qui correspond ; <code>WHEN OTHERS</code> attrape tout ce qui reste et doit être le dernier (sinon erreur de compilation). Les instructions situées entre la ligne fautive et <code>EXCEPTION</code> ne sont jamais exécutées.</p>
   <script type="text/plsql" data-title="Structure">
     BEGIN
       -- instructions
@@ -32,11 +33,11 @@
   <div class="table-wrap"><table>
     <thead><tr><th>Nom</th><th>Code</th><th>Cause typique</th></tr></thead>
     <tbody>
-      <tr><td><code>NO_DATA_FOUND</code></td><td>ORA-01403</td><td><code>SELECT INTO</code> sans ligne ; lecture d'un élément inexistant d'un tableau associatif</td></tr>
+      <tr><td><code>NO_DATA_FOUND</code></td><td>ORA-01403 (<code>SQLCODE</code> = +100)</td><td><code>SELECT INTO</code> sans ligne ; lecture d'un élément inexistant d'un tableau associatif</td></tr>
       <tr><td><code>TOO_MANY_ROWS</code></td><td>ORA-01422</td><td><code>SELECT INTO</code> avec plusieurs lignes</td></tr>
       <tr><td><code>DUP_VAL_ON_INDEX</code></td><td>ORA-00001</td><td>Violation de clé primaire ou d'index unique</td></tr>
       <tr><td><code>ZERO_DIVIDE</code></td><td>ORA-01476</td><td>Division par zéro</td></tr>
-      <tr><td><code>VALUE_ERROR</code></td><td>ORA-06502</td><td>Chaîne trop longue, conversion impossible en PL/SQL</td></tr>
+      <tr><td><code>VALUE_ERROR</code></td><td>ORA-06502</td><td>Chaîne trop longue, nombre trop grand pour sa précision, conversion impossible dans une instruction PL/SQL</td></tr>
       <tr><td><code>INVALID_NUMBER</code></td><td>ORA-01722</td><td>Conversion de chaîne en nombre impossible dans un ordre SQL</td></tr>
       <tr><td><code>INVALID_CURSOR</code></td><td>ORA-01001</td><td>Opération sur un curseur fermé</td></tr>
       <tr><td><code>CURSOR_ALREADY_OPEN</code></td><td>ORA-06511</td><td><code>OPEN</code> d'un curseur déjà ouvert</td></tr>
@@ -45,7 +46,10 @@
       <tr><td><code>SUBSCRIPT_BEYOND_COUNT</code></td><td>ORA-06533</td><td>Indice au-delà du nombre d'éléments d'une collection</td></tr>
     </tbody>
   </table></div>
-  <p class="prose"><code>SQLCODE</code> renvoie le numéro (négatif, sauf <code>NO_DATA_FOUND</code> qui renvoie +100) et <code>SQLERRM</code> le message. Ces deux fonctions ne s'utilisent pas directement dans un ordre SQL : copie-les d'abord dans des variables.</p>
+  <p class="prose"><code>SQLCODE</code> renvoie le numéro de l'erreur courante (négatif, sauf <code>NO_DATA_FOUND</code> qui renvoie <strong>+100</strong>, et une exception utilisateur qui renvoie +1) et <code>SQLERRM</code> son message (tronqué à 512 octets ; <code>DBMS_UTILITY.FORMAT_ERROR_STACK</code> va jusqu'à 2 000). Hors d'un gestionnaire, <code>SQLCODE</code> vaut 0. Ces deux fonctions ne s'utilisent pas directement dans un ordre SQL : copie-les d'abord dans des variables.</p>
+  <div class="callout pitfall"><span class="ct">Piège : NO_DATA_FOUND dans une fonction appelée en SQL</span>
+    <p>Si une fonction appelée depuis un <code>SELECT</code> laisse échapper <code>NO_DATA_FOUND</code>, le moteur SQL l'interprète comme « plus de ligne » : la requête renvoie <code>NULL</code> pour cette valeur, <strong>sans erreur</strong>. Avec une fonction <code>nom_employe(p_id)</code> qui fait un simple <code>SELECT INTO</code> sans gestionnaire, <code>SELECT nom_employe(999) FROM dual;</code> affiche une valeur vide alors que le même appel dans un bloc PL/SQL lève ORA-01403. Traite explicitement <code>NO_DATA_FOUND</code> dans les fonctions destinées au SQL.</p>
+  </div>
 
   <h2>Trois façons de créer ses propres erreurs</h2>
   <h3>1. Exception utilisateur + RAISE</h3>
@@ -64,30 +68,33 @@
     /
   </script>
   <div class="output">Salaire sous le minimum : 1 / User-Defined Exception</div>
-  <p class="prose">Pratique en interne, mais si elle sort du programme, l'appelant ne voit que <code>ORA-06510: unhandled user-defined exception</code>, sans message utile.</p>
+  <p class="prose">Pratique en interne, mais si elle sort du programme sans être traitée, l'appelant ne voit que <code>ORA-06510: PL/SQL: unhandled user-defined exception</code>, sans message utile. Et hors de la portée du bloc qui la déclare, plus personne ne peut l'intercepter par son nom : seul <code>WHEN OTHERS</code> la voit encore.</p>
 
   <h3>2. RAISE_APPLICATION_ERROR : erreur métier avec message</h3>
-  <p class="prose">Lève une vraie erreur Oracle, avec un code entre <strong>-20000 et -20999</strong> et un message (jusqu'à 2048 octets) que le client reçoit comme n'importe quelle <code>ORA-</code>. C'est la façon standard de signaler une règle métier violée à une application.</p>
+  <p class="prose">Lève une vraie erreur Oracle, avec un code entre <strong>-20000 et -20999</strong> et un message (jusqu'à 2 048 octets) que le client reçoit comme n'importe quelle <code>ORA-</code>. C'est la façon standard de signaler une règle métier violée à une application.</p>
   <script type="text/plsql" data-title="RAISE_APPLICATION_ERROR">
+    DECLARE
+      l_actuel  employes.salaire%TYPE;
+      l_nouveau employes.salaire%TYPE := 3000;
     BEGIN
-      UPDATE employes SET salaire = salaire * 2 WHERE emp_id = 109;
-      IF SQL%ROWCOUNT = 0 THEN
-        RAISE_APPLICATION_ERROR(-20001, 'Employé 109 introuvable');
+      SELECT salaire INTO l_actuel FROM employes WHERE emp_id = 109;   -- 1400
+      IF l_nouveau > l_actuel * 1.5 THEN
+        RAISE_APPLICATION_ERROR(-20002, 'Augmentation de plus de 50 % refusée pour 109');
       END IF;
-      RAISE_APPLICATION_ERROR(-20002, 'Augmentation de plus de 50 % refusée', TRUE);  -- TRUE : garde la pile d'erreurs précédente
+      UPDATE employes SET salaire = l_nouveau WHERE emp_id = 109;
     END;
     /
   </script>
-  <div class="output">ORA-20002: Augmentation de plus de 50 % refusée</div>
+  <div class="output">ORA-20002: Augmentation de plus de 50 % refusée pour 109
+ORA-06512: at line 7</div>
+  <p class="prose">Le troisième paramètre, <code>keep_errors</code>, vaut <code>FALSE</code> par défaut : la nouvelle erreur <strong>remplace</strong> la pile d'erreurs. Avec <code>TRUE</code>, elle s'ajoute au-dessus, ce qui est utile dans un gestionnaire qui traduit une erreur technique en erreur métier sans perdre la cause (voir l'exercice 3). Un code hors de la plage lève <code>ORA-21000</code>.</p>
 
   <h3>3. PRAGMA EXCEPTION_INIT : nommer une erreur Oracle</h3>
-  <p class="prose">Beaucoup d'erreurs Oracle n'ont pas de nom prédéfini. On leur en donne un pour les intercepter proprement plutôt que de tester <code>SQLCODE</code> dans <code>WHEN OTHERS</code>.</p>
-  <script type="text/plsql" data-title="Associer un nom à ORA-02292 et ORA-02291">
+  <p class="prose">Beaucoup d'erreurs Oracle n'ont pas de nom prédéfini. On leur en donne un pour les intercepter proprement plutôt que de tester <code>SQLCODE</code> dans <code>WHEN OTHERS</code>. Le même mécanisme permet de nommer ses propres codes -20xxx pour que les appelants les interceptent par leur nom.</p>
+  <script type="text/plsql" data-title="Associer un nom à ORA-02292">
     DECLARE
       e_enfants_existent EXCEPTION;
       PRAGMA EXCEPTION_INIT(e_enfants_existent, -2292);   -- violation de FK : enregistrement fils trouvé
-      e_parent_absent EXCEPTION;
-      PRAGMA EXCEPTION_INIT(e_parent_absent, -2291);      -- violation de FK : clé parente introuvable
     BEGIN
       DELETE FROM departements WHERE dept_id = 20;
     EXCEPTION
@@ -96,14 +103,27 @@
     END;
     /
   </script>
+  <div class="output">Impossible : le département a encore des employés</div>
+  <p class="prose">Autres codes souvent nommés ainsi : -2291 (clé parente introuvable), -2290 (contrainte <code>CHECK</code>), -1400 (insertion de <code>NULL</code> dans une colonne obligatoire), -54 (ressource verrouillée avec <code>NOWAIT</code>).</p>
+
+  <h3>Re-lever : trois écritures à ne pas confondre</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Écriture</th><th>Effet</th><th>Où</th></tr></thead>
+    <tbody>
+      <tr><td><code>RAISE;</code></td><td>Re-lève l'exception <strong>courante</strong>, avec son code et son message d'origine</td><td>Uniquement dans un gestionnaire (sinon erreur de compilation)</td></tr>
+      <tr><td><code>RAISE e_nom;</code></td><td>Lève une exception nommée (prédéfinie ou déclarée)</td><td>Partout</td></tr>
+      <tr><td><code>RAISE_APPLICATION_ERROR(-20xxx, msg)</code></td><td>Lève une nouvelle erreur Oracle avec un message choisi</td><td>Partout ; dans un gestionnaire, elle remplace l'erreur d'origine (sauf <code>keep_errors</code> à <code>TRUE</code>)</td></tr>
+    </tbody>
+  </table></div>
 
   <h2>Propagation : où va l'exception ?</h2>
   <p class="prose">Si le bloc courant n'a pas de gestionnaire adapté, l'exception <strong>remonte</strong> au bloc englobant, puis à l'appelant, et ainsi de suite jusqu'au client. Trois règles à connaître par cœur :</p>
   <ol class="prose">
     <li>Une exception levée dans la section <strong>DECLARE</strong> (initialisation invalide) n'est pas traitée par la section <code>EXCEPTION</code> du même bloc : elle part directement au bloc englobant.</li>
-    <li>Une exception levée <strong>dans un gestionnaire</strong> <code>EXCEPTION</code> part aussi directement au bloc englobant.</li>
+    <li>Une exception levée <strong>dans un gestionnaire</strong> <code>EXCEPTION</code> (y compris par <code>RAISE</code> ou <code>RAISE_APPLICATION_ERROR</code>) part aussi directement au bloc englobant.</li>
     <li>Une fois l'exception traitée, l'exécution reprend <strong>après le bloc</strong> qui l'a traitée, jamais à la ligne qui l'a levée.</li>
   </ol>
+  <p class="prose">L'animation suivante montre une <code>TOO_MANY_ROWS</code> levée dans un sous-bloc qui ne sait traiter que <code>NO_DATA_FOUND</code>.</p>
   <div data-stepper="propagation"></div>
   <div class="diagram">
     <pre class="mermaid">
@@ -114,14 +134,65 @@ flowchart TB
   P -- oui --> E2(["Même recherche dans le bloc englobant"])
   P -- non --> C["Retour à l'appelant / au client :<br/>ORA-xxxxx non traitée,<br/>travail de l'appel annulé"]
     </pre>
+    <p class="cap">Recherche d'un gestionnaire, de bloc en bloc, jusqu'au client.</p>
+  </div>
+
+  <h2>Exceptions et transaction : qu'est-ce qui est annulé ?</h2>
+  <p class="prose">Oracle garantit l'atomicité <strong>au niveau de l'instruction</strong> : un ordre DML qui échoue est annulé à lui seul (les lignes qu'il avait déjà modifiées sont restaurées), mais les ordres réussis avant lui restent en place. Pour le client, un bloc anonyme ou un <code>EXEC</code> est <strong>un seul appel</strong> : si une exception remonte jusqu'à lui, Oracle annule tout ce que cet appel a modifié, mais rien de ce qui avait été fait avant dans la même transaction.</p>
+  <script type="text/plsql" data-title="Trois scénarios">
+    UPDATE employes SET salaire = 5000 WHERE emp_id = 103;   -- ordre séparé, avant le bloc
+
+    BEGIN
+      UPDATE employes SET salaire = 4500 WHERE emp_id = 102;
+      UPDATE employes SET salaire = -1   WHERE emp_id = 104; -- ORA-02290 (ck_emp_salaire)
+    EXCEPTION                                                -- scénario B : avec ce gestionnaire
+      WHEN OTHERS THEN DBMS_OUTPUT.PUT_LINE('Erreur traitée');
+    END;
+    /
+    SELECT emp_id, salaire FROM employes WHERE emp_id IN (102, 103, 104);
+    ROLLBACK;
+  </script>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Scénario</th><th>102</th><th>103</th><th>104</th><th>Explication</th></tr></thead>
+    <tbody>
+      <tr><td>A. Bloc <strong>sans</strong> section <code>EXCEPTION</code></td><td>4300</td><td>5000</td><td>4800</td><td>L'erreur atteint le client : tout l'appel est annulé (la mise à jour de 102 aussi). L'<code>UPDATE</code> de 103, fait avant l'appel, reste.</td></tr>
+      <tr><td>B. Bloc <strong>avec</strong> <code>WHEN OTHERS</code> (sans <code>RAISE</code>)</td><td>4500</td><td>5000</td><td>4800</td><td>Seul l'ordre fautif est annulé. Le bloc « réussit » : 102 reste modifié, en attente de <code>COMMIT</code> ou <code>ROLLBACK</code>.</td></tr>
+      <tr><td>C. Comme B, mais le gestionnaire finit par <code>RAISE;</code></td><td>4300</td><td>5000</td><td>4800</td><td>L'exception atteint de nouveau le client : retour au scénario A.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout pitfall"><span class="ct">Piège : une procédure qui échoue n'annule pas son propre travail</span>
+    <p>Si une procédure appelée lève une exception et que <strong>l'appelant PL/SQL l'intercepte</strong>, les DML déjà faits par la procédure ne sont <strong>pas</strong> annulés : seul l'ordre fautif l'est. Ses paramètres <code>OUT</code> ne sont pas non plus renseignés (sauf ceux passés avec <code>NOCOPY</code>, qui peuvent garder une valeur partielle). Si tu veux un « tout ou rien » pour la procédure, pose un <code>SAVEPOINT</code> au début et fais <code>ROLLBACK TO</code> ce point dans le gestionnaire avant de re-lever (chapitre 11).</p>
   </div>
   <div class="callout interview"><span class="ct">En entretien : « Que devient la transaction si une exception n'est pas traitée ? »</span>
-    <p>L'appel envoyé par le client (le bloc anonyme ou l'<code>EXEC</code>) est traité comme un seul ordre : si une exception remonte jusqu'au client, Oracle annule <strong>tout ce que cet appel a modifié</strong> (rollback au niveau instruction), mais pas le travail fait avant l'appel dans la même transaction. Si l'exception est traitée dans le code, rien n'est annulé automatiquement : les DML réussis avant l'erreur restent en attente de <code>COMMIT</code> ou <code>ROLLBACK</code>.</p>
+    <p>Réponds en trois temps. 1) L'ordre fautif est toujours annulé (rollback au niveau instruction). 2) Si l'exception remonte jusqu'au client, tout ce que l'appel (bloc anonyme, <code>EXEC</code>) a modifié est annulé, mais pas le travail antérieur de la transaction, qui reste ouverte. 3) Si l'exception est traitée dans le code, rien d'autre n'est annulé automatiquement : c'est au développeur de décider (<code>ROLLBACK</code>, <code>ROLLBACK TO SAVEPOINT</code> ou rien).</p>
   </div>
+
+  <h2>Exceptions dans une boucle</h2>
+  <p class="prose">Une exception non traitée dans le corps d'une boucle la quitte immédiatement : les tours restants n'ont pas lieu. Pour continuer malgré une erreur sur une ligne, encapsule le traitement de la ligne dans un sous-bloc <code>BEGIN … EXCEPTION … END;</code> <strong>à l'intérieur</strong> de la boucle. L'erreur est traitée localement et la boucle reprend au tour suivant.</p>
+  <script type="text/plsql" data-title="Continuer malgré une erreur">
+    BEGIN
+      FOR r IN (SELECT emp_id, salaire FROM employes WHERE dept_id = 30 ORDER BY emp_id) LOOP
+        BEGIN
+          UPDATE employes SET salaire = salaire - 3000 WHERE emp_id = r.emp_id;
+          DBMS_OUTPUT.PUT_LINE(r.emp_id || ' : OK');
+        EXCEPTION
+          WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE(r.emp_id || ' : ' || SQLERRM);   -- et on continue
+        END;
+      END LOOP;
+      ROLLBACK;
+    END;
+    /
+  </script>
+  <div class="output">105 : OK
+106 : OK
+107 : ORA-02290: check constraint (RH.CK_EMP_SALAIRE) violated
+108 : ORA-02290: check constraint (RH.CK_EMP_SALAIRE) violated</div>
+  <p class="prose">Le préfixe <code>RH.</code> est le nom du schéma propriétaire de la table. Pour de gros volumes, on préfère <code>FORALL … SAVE EXCEPTIONS</code> (<a href="#ch09">chapitre 09</a>).</p>
 
   <h2>Journaliser correctement une erreur</h2>
   <p class="prose"><code>SQLERRM</code> donne le message, mais pas la ligne d'origine. <code>DBMS_UTILITY.FORMAT_ERROR_BACKTRACE</code> donne la pile des numéros de ligne jusqu'à l'endroit où l'erreur a été levée : indispensable en production.</p>
-  <script type="text/plsql" data-title="Procédure de log réutilisable (version complète au chapitre 11)">
+  <script type="text/plsql" data-title="Procédure de log réutilisable">
     CREATE OR REPLACE PROCEDURE log_erreur (p_programme IN VARCHAR2) IS
       PRAGMA AUTONOMOUS_TRANSACTION;          -- le log survit au ROLLBACK de l'appelant (chapitre 11)
       l_code NUMBER         := SQLCODE;
@@ -144,10 +215,29 @@ flowchart TB
     END;
     /
   </script>
+  <div class="output">ORA-02290: check constraint (RH.CK_EMP_SALAIRE) violated
+ORA-06512: at line 6</div>
+  <p class="prose">Remarque la ligne 6 du bloc anonyme : c'est celle du <code>RAISE</code>, pas celle de l'<code>UPDATE</code> (ligne 2). <code>RAISE;</code> conserve le code et le message d'origine, mais l'information de ligne repart du point où l'exception est re-levée : ce que voient ensuite le client, un gestionnaire englobant ou un <code>FORMAT_ERROR_BACKTRACE</code> appelé plus haut, c'est la ligne du <code>RAISE</code>. La ligne d'origine est perdue. Le journal, lui, a lu le backtrace dans le gestionnaire, <strong>avant</strong> le <code>RAISE</code> : il contient <code>ORA-06512: at line 2</code>.</p>
+  <p class="prose">Nuance : ce n'est pas la propagation qui efface la trace. Tant qu'aucun gestionnaire ne l'intercepte, l'exception remonte avec toute sa pile (une ligne <code>ORA-06512</code> par niveau traversé). C'est l'<strong>interception suivie d'une nouvelle levée</strong> (<code>RAISE;</code>, <code>RAISE e_nom;</code> ou <code>RAISE_APPLICATION_ERROR</code>) qui fait repartir le backtrace de ce point. D'où la règle : journalise le backtrace dans le premier gestionnaire qui intercepte l'erreur, avant de re-lever.</p>
+
+  <h3>UTL_CALL_STACK (12c) : la même information, structurée</h3>
+  <p class="prose">Le package <code>UTL_CALL_STACK</code> expose la pile d'erreurs (numéro, message) et le backtrace (unité, ligne) niveau par niveau, sans analyser de texte. Pour la pile d'appels, il va plus loin que <code>FORMAT_CALL_STACK</code> : il donne le nom du sous-programme <strong>à l'intérieur d'un package</strong> (<code>pkg_rh.augmenter</code>), là où les fonctions de <code>DBMS_UTILITY</code> ne citent que le package. Pour le backtrace, en revanche, il ne fournit que l'unité et la ligne.</p>
+  <script type="text/plsql" data-title="Lire le backtrace avec UTL_CALL_STACK">
+    EXCEPTION
+      WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Erreur ORA-' || TO_CHAR(UTL_CALL_STACK.ERROR_NUMBER(1), 'FM00000')
+                             || ' : ' || UTL_CALL_STACK.ERROR_MSG(1));
+        FOR i IN 1 .. UTL_CALL_STACK.BACKTRACE_DEPTH LOOP
+          DBMS_OUTPUT.PUT_LINE(NVL(UTL_CALL_STACK.BACKTRACE_UNIT(i), '(bloc anonyme)')
+                               || ' ligne ' || UTL_CALL_STACK.BACKTRACE_LINE(i));
+        END LOOP;
+        RAISE;
+  </script>
+  <p class="prose">Pour la pile d'appels (qui appelle qui, même sans erreur), on utilise <code>UTL_CALL_STACK.DYNAMIC_DEPTH</code> et <code>CONCATENATE_SUBPROGRAM(SUBPROGRAM(i))</code>, ou l'ancien <code>DBMS_UTILITY.FORMAT_CALL_STACK</code>.</p>
+
   <div class="callout pitfall"><span class="ct">L'anti-pattern n°1 : WHEN OTHERS THEN NULL</span>
-    <p>Avaler toutes les erreurs sans rien dire masque les bugs, laisse des données à moitié traitées et rend le diagnostic impossible. Le compilateur le signale d'ailleurs (avertissement <code>PLW-06009</code>). Règle : un <code>WHEN OTHERS</code> doit se terminer par <code>RAISE</code> ou <code>RAISE_APPLICATION_ERROR</code>, sauf cas très documenté (ex. traitement de masse qui journalise et continue).</p>
+    <p>Avaler toutes les erreurs sans rien dire masque les bugs, laisse des données à moitié traitées et rend le diagnostic impossible. Quand les avertissements sont activés (<code>ALTER SESSION SET PLSQL_WARNINGS = 'ENABLE:ALL'</code>), le compilateur le signale avec <code>PLW-06009</code>. Règle : un <code>WHEN OTHERS</code> doit se terminer par <code>RAISE</code> ou <code>RAISE_APPLICATION_ERROR</code>, sauf cas très documenté (ex. traitement de masse qui journalise et continue).</p>
   </div>
-  <div class="callout tip"><span class="ct">Astuce</span><p>Pour continuer une boucle malgré une erreur sur une ligne, encapsule le traitement de la ligne dans un sous-bloc <code>BEGIN … EXCEPTION … END;</code> à l'intérieur de la boucle. L'erreur est traitée localement et la boucle reprend au tour suivant.</p></div>
 
   <h2>Exercices</h2>
   <div class="ex" data-ex="ch05-e1">
@@ -193,7 +283,7 @@ flowchart TB
       <details class="sol"><summary>Voir la solution</summary>
         <div class="output" style="margin:8px 0">A
 E</div>
-        <p>L'erreur est levée dans la section <strong>déclarative</strong> du sous-bloc : son propre gestionnaire ne la voit pas (pas de C) et la ligne B n'est jamais atteinte. L'exception remonte au bloc externe, qui saute directement à sa section <code>EXCEPTION</code> (pas de D) et affiche E.</p>
+        <p>L'erreur (ORA-06502) est levée dans la section <strong>déclarative</strong> du sous-bloc : son propre gestionnaire ne la voit pas (pas de C) et la ligne B n'est jamais atteinte. L'exception remonte au bloc externe, qui saute directement à sa section <code>EXCEPTION</code> (pas de D) et affiche E.</p>
       </details>
     </div>
   </div>
@@ -213,12 +303,12 @@ E</div>
             p_salaire  IN employes.salaire%TYPE,
             p_dept_id  IN employes.dept_id%TYPE
           ) IS
-            c_smic CONSTANT NUMBER := 1400;
+            c_sal_min CONSTANT NUMBER := 1400;
             e_dept_inconnu EXCEPTION;
             PRAGMA EXCEPTION_INIT(e_dept_inconnu, -2291);
           BEGIN
-            IF p_salaire < c_smic THEN
-              RAISE_APPLICATION_ERROR(-20010, 'Salaire ' || p_salaire || ' inférieur au minimum ' || c_smic);
+            IF p_salaire < c_sal_min THEN
+              RAISE_APPLICATION_ERROR(-20010, 'Salaire ' || p_salaire || ' inférieur au minimum ' || c_sal_min);
             END IF;
 
             INSERT INTO employes (emp_id, nom, poste, salaire, dept_id)
@@ -231,7 +321,7 @@ E</div>
 
           EXEC embaucher('Blanc', 'DEV', 3500, 99);   -- ORA-20011: Département 99 inexistant
         </script>
-        <p class="hint">Pas de <code>COMMIT</code> dans la procédure : c'est à l'appelant de décider de la fin de transaction (chapitre 11).</p>
+        <p class="hint">Grâce à <code>TRUE</code>, la pile contient aussi l'ORA-02291 d'origine sous l'ORA-20011. Pas de <code>COMMIT</code> dans la procédure : c'est à l'appelant de décider de la fin de transaction (chapitre 11). Note qu'une valeur de séquence est consommée même quand l'insertion échoue : les séquences ne garantissent pas l'absence de trous.</p>
       </details>
     </div>
   </div>
@@ -260,7 +350,38 @@ E</div>
           END;
           /
         </script>
-        <p class="hint">Résultat attendu : <code>3 réussies, 2 en erreur</code> (Durand à 3900 et Garcia à 1400 passeraient sous zéro). Au chapitre 09, on fera la même chose bien plus vite avec <code>FORALL … SAVE EXCEPTIONS</code>.</p>
+        <div class="output" style="margin:8px 0">3 réussies, 2 en erreur</div>
+        <p class="hint">Bernard (7200), Petit (4300) et Leroy (4800) restent positifs ; Durand (103, 3900) et Garcia (109, 1400) passeraient sous zéro. Le <code>ROLLBACK</code> final annule les trois mises à jour, mais les deux lignes de <code>journal_erreurs</code> restent, car <code>log_erreur</code> valide dans sa propre transaction autonome. Au <a href="#ch09">chapitre 09</a>, on fera la même chose bien plus vite avec <code>FORALL … SAVE EXCEPTIONS</code>.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch05-e5">
+    <div class="ex-head"><h4>Exercice 5 · Quel est l'état des données ?</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Qu'affiche ce script, et quels salaires renvoie le <code>SELECT</code> final ? Même question si on supprime la ligne 10.</p>
+      <script type="text/plsql" data-title="À prédire">
+        BEGIN
+          UPDATE employes SET salaire = salaire + 100 WHERE emp_id = 102;
+          BEGIN
+            UPDATE employes SET salaire = 0 WHERE emp_id = 103;     -- viole ck_emp_salaire
+          EXCEPTION
+            WHEN OTHERS THEN
+              DBMS_OUTPUT.PUT_LINE('Erreur ignorée : ' || SQLCODE);
+          END;
+          UPDATE employes SET salaire = salaire + 100 WHERE emp_id = 104;
+          RAISE NO_DATA_FOUND;
+        END;
+        /
+        SELECT emp_id, salaire FROM employes WHERE emp_id IN (102, 103, 104);
+        ROLLBACK;
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <div class="output" style="margin:8px 0">ORA-01403: no data found
+ORA-06512: at line 10
+Erreur ignorée : -2290</div>
+        <p>L'ordre d'affichage surprend : SQL*Plus affiche d'abord le message d'erreur, puis le contenu du tampon <code>DBMS_OUTPUT</code>. Le tampon n'est pas annulé par l'échec de l'appel (ce n'est pas une donnée transactionnelle) et il est lu une fois l'appel terminé, même en erreur. SQL Developer l'affiche dans son panneau séparé.</p>
+        <p>Le sous-bloc traite l'erreur sur 103 : seul cet <code>UPDATE</code> est annulé et l'exécution continue. Mais le <code>RAISE NO_DATA_FOUND</code> final n'est traité par personne : il atteint le client, qui annule <strong>tout l'appel</strong>. Le <code>SELECT</code> renvoie les valeurs initiales : 102 = 4300, 103 = 3900, 104 = 4800.</p>
+        <p>Sans la ligne 10, le bloc réussit : 102 = 4400, 103 = 3900 (ordre fautif annulé seul), 104 = 4900, en attente de validation jusqu'au <code>ROLLBACK</code>.</p>
       </details>
     </div>
   </div>
@@ -269,8 +390,9 @@ E</div>
   <div data-quiz="ch05"></div>
 
   <h2>Questions d'entretien</h2>
-  <details class="qa"><summary>Différence entre RAISE et RAISE_APPLICATION_ERROR ?</summary><div><p><code>RAISE</code> lève une exception nommée (prédéfinie ou déclarée), ou re-lève l'exception courante quand il est utilisé seul dans un gestionnaire. <code>RAISE_APPLICATION_ERROR</code> crée une erreur Oracle avec un code entre -20000 et -20999 et un message personnalisé, que l'application cliente reçoit comme une erreur <code>ORA-</code> classique.</p></div></details>
+  <details class="qa"><summary>Différence entre RAISE et RAISE_APPLICATION_ERROR ?</summary><div><p><code>RAISE</code> lève une exception nommée (prédéfinie ou déclarée), ou re-lève l'exception courante quand il est utilisé seul dans un gestionnaire. <code>RAISE_APPLICATION_ERROR</code> crée une erreur Oracle avec un code entre -20000 et -20999 et un message personnalisé, que l'application cliente reçoit comme une erreur <code>ORA-</code> classique. Une exception utilisateur levée par <code>RAISE</code> et non traitée n'arrive au client que sous la forme <code>ORA-06510</code>, sans message métier.</p></div></details>
+  <details class="qa"><summary>Que devient la transaction quand une exception n'est pas traitée ?</summary><div><p>L'ordre fautif est toujours annulé (atomicité au niveau instruction). Si l'exception remonte jusqu'au client, tout ce que l'appel a modifié est annulé, mais pas le travail fait avant l'appel : la transaction reste ouverte. Si l'exception est interceptée dans le code, seuls les effets de l'ordre fautif disparaissent ; le reste attend un <code>COMMIT</code> ou un <code>ROLLBACK</code> explicite.</p></div></details>
   <details class="qa"><summary>Pourquoi WHEN OTHERS THEN NULL est-il dangereux ?</summary><div><p>Il masque toutes les erreurs, y compris celles qu'on n'avait pas prévues (espace disque, verrou, bug). Le programme semble réussir, la transaction peut être validée avec des données incohérentes et personne n'est prévenu. On doit au minimum journaliser puis re-lever.</p></div></details>
-  <details class="qa"><summary>Comment retrouver la ligne qui a provoqué une erreur ?</summary><div><p>Avec <code>DBMS_UTILITY.FORMAT_ERROR_BACKTRACE</code>, appelé dans le gestionnaire d'exception. <code>SQLERRM</code> et <code>FORMAT_ERROR_STACK</code> donnent les messages, pas les lignes. Depuis 12c, <code>UTL_CALL_STACK</code> donne la même information de façon structurée.</p></div></details>
-  <details class="qa"><summary>À quoi sert PRAGMA EXCEPTION_INIT ?</summary><div><p>À associer un nom d'exception déclaré à un numéro d'erreur Oracle qui n'a pas de nom prédéfini (par exemple -2292 pour une violation de clé étrangère), pour l'intercepter par son nom dans un gestionnaire dédié.</p></div></details>
+  <details class="qa"><summary>Comment retrouver la ligne qui a provoqué une erreur ?</summary><div><p>Avec <code>DBMS_UTILITY.FORMAT_ERROR_BACKTRACE</code>, appelé dans le premier gestionnaire qui intercepte l'erreur et avant de re-lever : après un <code>RAISE</code>, le backtrace repart de la ligne du <code>RAISE</code> et la ligne d'origine est perdue. <code>SQLERRM</code> et <code>FORMAT_ERROR_STACK</code> donnent les messages, pas les lignes. Depuis 12c, <code>UTL_CALL_STACK</code> donne la même information de façon structurée (unité, ligne), et, pour la pile d'appels, le nom des sous-programmes de package.</p></div></details>
+  <details class="qa"><summary>À quoi sert PRAGMA EXCEPTION_INIT ?</summary><div><p>À associer un nom d'exception déclaré à un numéro d'erreur Oracle qui n'a pas de nom prédéfini (par exemple -2292 pour une violation de clé étrangère), pour l'intercepter par son nom dans un gestionnaire dédié plutôt que de tester <code>SQLCODE</code> dans <code>WHEN OTHERS</code>. On l'utilise aussi pour nommer ses propres codes -20xxx.</p></div></details>
 </section>

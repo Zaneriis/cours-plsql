@@ -2,26 +2,63 @@
 <section class="chapter" id="ch00" data-num="00" data-group="Démarrer" data-min="30" data-title="Préparer son environnement" data-desc="Une base Oracle gratuite, les outils, et le schéma RH utilisé dans tous les exemples." hidden>
   <p class="eyebrow">Chapitre 00 · 30 min</p>
   <h1>Préparer son environnement</h1>
-  <p class="lead">On apprend PL/SQL en l'exécutant. Avant tout, il te faut une base Oracle et le petit schéma « ressources humaines » sur lequel s'appuient tous les exemples et exercices.</p>
+  <p class="lead">On apprend PL/SQL en l'exécutant. Avant tout, il te faut une base Oracle, un outil pour lui parler et le petit schéma « ressources humaines » sur lequel s'appuient tous les exemples et exercices du cours.</p>
   <ul class="goals">
-    <li>disposer d'une base Oracle gratuite (en ligne ou en local) ;</li>
-    <li>créer les tables <code>departements</code>, <code>employes</code>, <code>journal_erreurs</code> et <code>historique_salaires</code> ;</li>
-    <li>activer l'affichage de <code>DBMS_OUTPUT</code> dans ton outil.</li>
+    <li>disposer d'une base Oracle gratuite (en ligne ou en local) et t'y connecter avec un utilisateur dédié <code>rh</code> ;</li>
+    <li>créer les tables <code>departements</code>, <code>employes</code>, <code>journal_erreurs</code>, <code>historique_salaires</code> et la séquence <code>seq_employes</code> ;</li>
+    <li>activer l'affichage de <code>DBMS_OUTPUT</code> et vérifier ton installation avec <code>DESC</code> et le dictionnaire de données.</li>
   </ul>
 
   <h2>Trois façons d'avoir une base Oracle</h2>
   <div class="table-wrap"><table>
     <thead><tr><th>Option</th><th>Pour qui</th><th>Comment</th></tr></thead>
     <tbody>
-      <tr><td><strong>Oracle Live SQL</strong></td><td>Rien à installer, idéal pour démarrer</td><td>Va sur <a href="https://livesql.oracle.com" target="_blank" rel="noopener">livesql.oracle.com</a>, connecte-toi avec un compte Oracle gratuit, colle le script ci-dessous dans le « SQL Worksheet ».</td></tr>
-      <tr><td><strong>Oracle Database Free (Docker)</strong></td><td>Tu as Docker et tu veux une vraie base locale</td><td><code>docker run -d --name oracle -p 1521:1521 -e ORACLE_PASSWORD=MotDePasse1 gvenzl/oracle-free</code> puis connexion avec l'utilisateur <code>system</code> sur le service <code>FREEPDB1</code>.</td></tr>
-      <tr><td><strong>Oracle Cloud Free Tier</strong></td><td>Tu veux une base autonome hébergée</td><td>Crée une « Autonomous Database » toujours gratuite et utilise « Database Actions › SQL » dans le navigateur.</td></tr>
+      <tr><td><strong>Oracle Live SQL</strong></td><td>Rien à installer, idéal pour démarrer</td><td>Va sur <a href="https://livesql.oracle.com" target="_blank" rel="noopener">livesql.oracle.com</a>, connecte-toi avec un compte Oracle gratuit et colle le script du schéma dans la feuille SQL. Tu travailles dans ton propre schéma, sans rien configurer.</td></tr>
+      <tr><td><strong>Oracle Database Free (Docker)</strong></td><td>Tu as Docker et tu veux une vraie base locale, comme en entreprise</td><td>Image communautaire <code>gvenzl/oracle-free</code> (Oracle Database Free 23ai, renommée « Oracle AI Database 26ai » à partir de la version 23.26 : tout ce que le cours dit de 23ai s'y applique). Détails ci-dessous.</td></tr>
+      <tr><td><strong>Oracle Cloud Free Tier</strong></td><td>Tu veux une base hébergée accessible de partout</td><td>Crée une « Autonomous Database » <em>Always Free</em>, puis ouvre « Database Actions » dans le navigateur avec l'utilisateur <code>ADMIN</code>. Crée un utilisateur <code>rh</code> (page <em>Database Users</em>, avec l'accès web activé), reconnecte-toi avec lui et ouvre « SQL ».</td></tr>
     </tbody>
   </table></div>
-  <p class="prose">Côté client, <strong>SQL Developer</strong> (gratuit) ou l'extension <strong>Oracle SQL Developer for VS Code</strong> font très bien l'affaire. En entretien, on te montrera souvent SQL Developer ou Toad : sache où trouver la fenêtre de sortie <code>DBMS_OUTPUT</code> et le panneau des erreurs de compilation.</p>
+
+  <h3>Docker pas à pas</h3>
+  <p class="prose">Les variables <code>APP_USER</code> et <code>APP_USER_PASSWORD</code> demandent à l'image de créer un utilisateur applicatif dans la base enfichable <code>FREEPDB1</code>. L'image lui donne un quota illimité sur le tablespace <code>USERS</code> et le rôle <code>DB_DEVELOPER_ROLE</code> (23ai), qui couvre tout ce que le cours crée : tables, vues, séquences, procédures, packages, types, triggers. Tu travailleras avec lui plutôt qu'avec <code>SYSTEM</code> : on ne crée jamais ses tables dans un compte d'administration. C'est aussi l'utilisateur <code>RH</code> que tu verras apparaître dans certains messages d'erreur du cours (<code>RH.EMPLOYES</code>…).</p>
+  <script type="text/plsql" data-title="Terminal : créer et démarrer le conteneur">
+    docker run -d --name oracle -p 1521:1521 \
+      -e ORACLE_PASSWORD=MotDePasse1 \
+      -e APP_USER=rh -e APP_USER_PASSWORD=rh \
+      gvenzl/oracle-free
+
+    # Attendre le message DATABASE IS READY TO USE! (une à quelques minutes au premier démarrage)
+    docker logs -f oracle
+
+    # Ensuite : docker stop oracle / docker start oracle
+    # Les données sont conservées tant que tu ne supprimes pas le conteneur (docker rm)
+  </script>
+  <p class="prose">Paramètres de connexion, quel que soit l'outil : hôte <code>localhost</code>, port <code>1521</code>, <strong>nom de service</strong> <code>FREEPDB1</code>, utilisateur <code>rh</code>, mot de passe <code>rh</code>.</p>
+  <script type="text/plsql" data-title="Terminal : se connecter">
+    # SQL*Plus, déjà présent dans le conteneur (NLS_LANG pour que les accents passent)
+    docker exec -it -e NLS_LANG=AMERICAN_AMERICA.AL32UTF8 oracle sqlplus rh/rh@//localhost/FREEPDB1
+
+    # SQLcl installé sur ta machine (commande sql)
+    sql rh/rh@//localhost:1521/FREEPDB1
+  </script>
+  <div class="callout pitfall"><span class="ct">Piège : CDB ou PDB ?</span><p>Une base Oracle récente est une base conteneur (CDB, ici <code>FREE</code>) qui héberge des bases enfichables (PDB, ici <code>FREEPDB1</code>). Si tu te connectes au service <code>FREE</code> ou au SID <code>FREE</code>, tu arrives dans le conteneur racine : l'utilisateur <code>rh</code> n'y existe pas (<code>ORA-01017: invalid username/password</code>), et un <code>CREATE USER rh</code> lancé là en <code>system</code> échoue avec <code>ORA-65096</code> (nom d'utilisateur commun invalide). Connecte-toi toujours au <strong>service</strong> <code>FREEPDB1</code>.</p></div>
+  <p class="prose">Sur une autre base (19c d'entreprise, utilisateur créé à la main), si un chapitre échoue sur <code>ORA-01031: insufficient privileges</code> (création de vue, de type…), demande le privilège manquant à l'administrateur, par exemple <code>GRANT CREATE VIEW TO rh;</code>.</p>
+  <div class="callout tip"><span class="ct">Astuce : messages en anglais et accents</span><p>Les messages d'erreur du cours sont en anglais. Si ton outil les affiche en français (SQL Developer reprend souvent la langue de ton système), exécute <code>ALTER SESSION SET NLS_LANGUAGE = AMERICAN;</code> pour comparer plus facilement. Dans SQL*Plus en terminal, sans <code>NLS_LANG</code> en UTF-8, les accents (<code>Inès</code>, <code>employés</code>) peuvent devenir des <code>?</code> : d'où la variable passée à <code>docker exec</code> ci-dessus. SQLcl et SQL Developer n'ont pas ce problème.</p></div>
+
+  <h2>Les outils côté client</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Outil</th><th>Ce qu'il faut savoir</th></tr></thead>
+    <tbody>
+      <tr><td><strong>SQL Developer</strong></td><td>Gratuit, le plus répandu en entreprise. Nouvelle connexion : renseigne utilisateur, mot de passe, hôte, port et coche <em>Service name</em> (pas <em>SID</em>) avec <code>FREEPDB1</code>. <kbd>Ctrl+Entrée</kbd> exécute l'instruction sous le curseur, <kbd>F5</kbd> exécute toute la feuille comme un script.</td></tr>
+      <tr><td><strong>SQL Developer for VS Code</strong></td><td>Extension officielle d'Oracle, mêmes paramètres de connexion. Pratique si VS Code est déjà ton éditeur.</td></tr>
+      <tr><td><strong>SQLcl</strong> (commande <code>sql</code>)</td><td>Ligne de commande moderne, compatible avec les scripts SQL*Plus, avec historique et complétion. Idéal pour rejouer <code>schema_rh.sql</code> avec <code>@schema_rh.sql</code>.</td></tr>
+      <tr><td><strong>SQL*Plus</strong></td><td>Le client historique, toujours présent sur les serveurs. Austère, mais tout ce qui y fonctionne fonctionne partout.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose">En entretien, on te montrera souvent SQL Developer ou Toad : sache où trouver la fenêtre de sortie <code>DBMS_OUTPUT</code> et le panneau des erreurs de compilation (le <a href="#ch01">chapitre 01</a> montre aussi <code>SHOW ERRORS</code> et <code>USER_ERRORS</code>).</p>
 
   <h2>Activer la sortie</h2>
-  <p class="prose"><code>DBMS_OUTPUT.PUT_LINE</code> écrit dans un tampon côté serveur. Le client ne l'affiche que si tu le lui demandes :</p>
+  <p class="prose"><code>DBMS_OUTPUT.PUT_LINE</code> écrit dans un tampon côté serveur. Le client ne lit ce tampon et ne l'affiche, à la fin du bloc, que si tu le lui demandes. Le réglage vaut pour la session : à refaire à chaque nouvelle connexion.</p>
   <script type="text/plsql" data-title="SQL*Plus / SQL Developer / SQLcl">
     SET SERVEROUTPUT ON SIZE UNLIMITED
 
@@ -31,7 +68,8 @@
     /
   </script>
   <div class="output">Bonjour depuis PL/SQL !</div>
-  <div class="callout pitfall"><span class="ct">Piège</span><p>Le <code>/</code> seul sur sa ligne n'est pas du PL/SQL : c'est l'ordre donné à SQL*Plus (ou SQL Developer en mode script) d'envoyer le bloc au serveur. Sans lui, un script de plusieurs blocs ne s'exécute pas ou s'exécute mal.</p></div>
+  <p class="prose">Dans SQL Developer, tu peux aussi ouvrir le panneau <em>Affichage › Sortie SGBD</em> (<em>View › Dbms Output</em>) et activer la sortie pour ta connexion. Live SQL et Database Actions affichent en général la sortie sans réglage ; si rien n'apparaît, exécute quand même <code>SET SERVEROUTPUT ON</code>.</p>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Le <code>/</code> seul sur sa ligne n'est pas du PL/SQL : c'est l'ordre donné à SQL*Plus, SQLcl ou SQL Developer (en mode script) d'envoyer le bloc au serveur. Sans lui, dans un script de plusieurs blocs, le client continue d'accumuler les lignes suivantes dans le même bloc et rien ne s'exécute comme prévu.</p></div>
 
   <h2>Le schéma d'exemple</h2>
   <p class="prose">Une petite entreprise : quatre départements (dont un vide, très utile pour provoquer des erreurs), dix employés avec une hiérarchie, une table de journalisation d'erreurs et un historique des salaires alimenté plus tard par un trigger.</p>
@@ -70,17 +108,19 @@ erDiagram
     VARCHAR2 programme
     NUMBER code
     VARCHAR2 message
+    VARCHAR2 backtrace
   }
     </pre>
     <p class="cap">Modèle de données utilisé dans tout le cours.</p>
   </div>
 
-  <script type="text/plsql" data-title="schema_rh.sql — à exécuter une fois">
-    -- Nettoyage si tu relances le script (ignore les erreurs ORA-00942 au premier passage)
+  <script type="text/plsql" data-title="schema_rh.sql : à exécuter une fois, puis pour revenir à l'état initial">
+    -- Nettoyage si tu relances le script (ignore les ORA-00942 / ORA-02289 au premier passage)
     DROP TABLE historique_salaires PURGE;
     DROP TABLE journal_erreurs PURGE;
     DROP TABLE employes PURGE;
     DROP TABLE departements PURGE;
+    DROP SEQUENCE seq_employes;
 
     CREATE TABLE departements (
       dept_id  NUMBER(4)    PRIMARY KEY,
@@ -136,9 +176,48 @@ erDiagram
     INSERT INTO employes VALUES (109, 'Garcia',  'Tom',     'STAGIAIRE',  1400, NULL, DATE '2024-09-01', 20, 102);
     COMMIT;
   </script>
-  <div class="callout tip"><span class="ct">Astuce</span><p>Garde ce script sous la main. Beaucoup d'exercices modifient les données : relance-le pour repartir d'un état propre. Sur Live SQL, les tables disparaissent à la fin de la session.</p></div>
+  <p class="prose">Les employés sont insérés dans l'ordre hiérarchique : un manager doit exister avant ses subordonnés, sinon la clé étrangère <code>manager_id</code> lève <code>ORA-02291</code> (clé parente introuvable).</p>
+  <div class="callout tip"><span class="ct">Astuce</span><p>Garde ce script sous la main. Beaucoup d'exercices modifient les données : relance-le pour repartir d'un état propre. Les triggers posés sur <code>employes</code> (chapitre 10) disparaissent avec la table et seront à recréer ; procédures, fonctions et packages restent en place et se recompilent à leur prochain appel. En 23ai, tu peux écrire <code>DROP TABLE IF EXISTS employes PURGE;</code> pour éviter les erreurs du premier passage. Sur Live SQL, si une table a disparu à ta reconnexion, relance simplement le script.</p></div>
 
-  <h2>Vérifier que tout fonctionne</h2>
+  <h2>Vérifier l'installation</h2>
+  <p class="prose"><code>DESC</code> (pour <code>DESCRIBE</code>, une commande du client et non du SQL) affiche la structure d'une table. C'est le réflexe à avoir avant d'écrire un <code>SELECT … INTO</code> ou une variable <code>%TYPE</code>. Elle fonctionne aussi sur une procédure ou un package pour voir ses paramètres.</p>
+  <script type="text/plsql" data-title="Structure d'une table">
+    DESC employes
+  </script>
+  <div class="output"> Name                                      Null?    Type
+ ----------------------------------------- -------- ----------------------------
+ EMP_ID                                    NOT NULL NUMBER(6)
+ NOM                                       NOT NULL VARCHAR2(50)
+ PRENOM                                             VARCHAR2(50)
+ POSTE                                              VARCHAR2(30)
+ SALAIRE                                            NUMBER(8,2)
+ COMMISSION                                         NUMBER(8,2)
+ DATE_EMBAUCHE                                      DATE
+ DEPT_ID                                            NUMBER(4)
+ MANAGER_ID                                         NUMBER(6)</div>
+  <p class="prose">Présentation SQL*Plus ; SQLcl et SQL Developer donnent les mêmes informations avec une mise en forme un peu différente. Note que <code>EMP_ID</code> est <code>NOT NULL</code> : c'est la clé primaire qui l'impose.</p>
+  <p class="prose">Le <strong>dictionnaire de données</strong> décrit tous tes objets. Les vues <code>USER_*</code> listent ce qui t'appartient (<code>USER_TABLES</code>, <code>USER_SEQUENCES</code>, <code>USER_OBJECTS</code>…), les vues <code>ALL_*</code> ce à quoi tu as accès, les vues <code>DBA_*</code> toute la base (privilège requis). Les noms y sont stockés <strong>en majuscules</strong>.</p>
+  <script type="text/plsql" data-title="Tables et séquence créées">
+    BEGIN
+      FOR t IN (SELECT table_name FROM user_tables ORDER BY table_name) LOOP
+        DBMS_OUTPUT.PUT_LINE('table    : ' || t.table_name);
+      END LOOP;
+      FOR s IN (SELECT sequence_name, last_number FROM user_sequences
+                 WHERE sequence_name = 'SEQ_EMPLOYES') LOOP
+        DBMS_OUTPUT.PUT_LINE('séquence : ' || s.sequence_name || ' (prochaine valeur ' || s.last_number || ')');
+      END LOOP;
+    END;
+    /
+  </script>
+  <div class="output">table    : DEPARTEMENTS
+table    : EMPLOYES
+table    : HISTORIQUE_SALAIRES
+table    : JOURNAL_ERREURS
+séquence : SEQ_EMPLOYES (prochaine valeur 200)</div>
+  <p class="prose">Sortie obtenue sur un schéma neuf, juste après le script. La boucle <code>FOR … IN (SELECT …)</code> (curseur implicite) est détaillée au <a href="#ch04">chapitre 04</a>. La colonne <code>LAST_NUMBER</code> tient compte du cache de la séquence : après quelques <code>NEXTVAL</code>, elle peut afficher une valeur plus grande que la dernière réellement distribuée.</p>
+  <div class="callout pitfall"><span class="ct">Piège</span><p><code>WHERE table_name = 'employes'</code> ne renvoie rien : sauf si tu les as créés entre guillemets doubles, les noms d'objets sont stockés en majuscules. Écris <code>'EMPLOYES'</code>.</p></div>
+
+  <h2>Exercices</h2>
   <div class="ex" data-ex="ch00-e1">
     <div class="ex-head"><h4>Exercice 1 · Premier contact</h4><span class="lvl l1">facile</span></div>
     <div class="ex-body">
@@ -156,8 +235,67 @@ erDiagram
           END;
           /
         </script>
-        <p class="hint">Si rien ne s'affiche, c'est presque toujours que <code>SET SERVEROUTPUT ON</code> n'a pas été exécuté dans la session.</p>
+        <div class="output" style="margin:8px 0">10 employés, masse salariale : 46900</div>
+        <p class="hint">Si rien ne s'affiche, c'est presque toujours que <code>SET SERVEROUTPUT ON</code> n'a pas été exécuté dans la session. Un agrégat sans <code>GROUP BY</code> renvoie toujours exactement une ligne : pas de risque de <code>NO_DATA_FOUND</code> ici.</p>
       </details>
     </div>
   </div>
+
+  <div class="ex" data-ex="ch00-e2">
+    <div class="ex-head"><h4>Exercice 2 · Un département à la loupe</h4><span class="lvl l1">facile</span></div>
+    <div class="ex-body">
+      <p>Écris un bloc anonyme qui affiche, pour le département 20, son nom, sa ville, son nombre d'employés et le salaire moyen, au format <code>Informatique (Lyon) : 5 employés, moyenne 4320</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            l_nom      departements.nom%TYPE;
+            l_ville    departements.ville%TYPE;
+            l_nb       PLS_INTEGER;
+            l_moyenne  NUMBER;
+          BEGIN
+            SELECT d.nom, d.ville, COUNT(e.emp_id), AVG(e.salaire)
+              INTO l_nom, l_ville, l_nb, l_moyenne
+              FROM departements d
+              LEFT JOIN employes e ON e.dept_id = d.dept_id
+             WHERE d.dept_id = 20
+             GROUP BY d.nom, d.ville;
+            DBMS_OUTPUT.PUT_LINE(l_nom || ' (' || l_ville || ') : ' || l_nb
+                                 || ' employés, moyenne ' || l_moyenne);
+          END;
+          /
+        </script>
+        <div class="output" style="margin:8px 0">Informatique (Lyon) : 5 employés, moyenne 4320</div>
+        <p class="hint">La jointure externe est un réflexe utile : avec <code>dept_id = 40</code>, elle affiche <code>RH (Nantes) : 0 employés, moyenne </code> (la moyenne est NULL, concaténée comme une chaîne vide). Avec une jointure interne, le département 40 ne renverrait aucune ligne et le <code>SELECT … INTO</code> lèverait <code>NO_DATA_FOUND</code> (voir <a href="#ch05">chapitre 05</a>).</p>
+      </details>
+    </div>
+  </div>
+
+  <div class="ex" data-ex="ch00-e3">
+    <div class="ex-head"><h4>Exercice 3 · Tester une contrainte puis annuler</h4><span class="lvl l2">moyen</span></div>
+    <div class="ex-body">
+      <p>Le schéma impose un salaire strictement positif. Mets le salaire du stagiaire (109) à 0 et lis le message d'erreur. Augmente-le ensuite à 1500, vérifie la nouvelle masse salariale, puis annule tout pour revenir à l'état initial. Quelle masse salariale affiches-tu avant et après l'annulation ?</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          UPDATE employes SET salaire = 0 WHERE emp_id = 109;
+          -- ORA-02290: check constraint (RH.CK_EMP_SALAIRE) violated
+
+          UPDATE employes SET salaire = 1500 WHERE emp_id = 109;
+          SELECT SUM(salaire) FROM employes;   -- 47000
+
+          ROLLBACK;
+          SELECT SUM(salaire) FROM employes;   -- 46900
+        </script>
+        <div class="output" style="margin:8px 0">ORA-02290: check constraint (RH.CK_EMP_SALAIRE) violated</div>
+        <p class="hint">Le premier <code>UPDATE</code> échoue sans rien modifier : un ordre SQL en erreur est annulé en entier (atomicité de l'instruction), sans toucher aux modifications déjà faites dans la transaction en cours. Le second passe la masse de 46 900 à 47 000. Comme aucun <code>COMMIT</code> n'a été fait, <code>ROLLBACK</code> ramène 46 900. Le schéma qui préfixe la contrainte (<code>RH</code>) est celui de ton utilisateur ; en 23ai, le message peut être suivi d'une ligne d'aide <code>Help: https://docs.oracle.com/error-help/db/ora-02290/</code>. Le rollback au niveau instruction est approfondi au <a href="#ch05">chapitre 05</a>.</p>
+      </details>
+    </div>
+  </div>
+
+  <h2>Quiz</h2>
+  <div data-quiz="ch00"></div>
+
+  <h2>Questions d'entretien</h2>
+  <details class="qa"><summary>Peut-on utiliser DBMS_OUTPUT pour tracer un traitement en production ?</summary><div><p>Ce n'est pas adapté. Le texte est stocké dans un tampon de la session et n'est lu par le client qu'<strong>à la fin</strong> de l'appel : on ne voit rien pendant un long traitement, et rien du tout si l'appelant (application Java, job planifié) ne lit pas le tampon. En production on écrit dans une table de journalisation via une transaction autonome (<a href="#ch05">chapitre 05</a>, package <code>pkg_log</code> au <a href="#ch12">chapitre 12</a>), et on suit l'avancement avec <code>DBMS_APPLICATION_INFO</code>.</p></div></details>
+  <details class="qa"><summary>Quelle différence entre une CDB et une PDB ?</summary><div><p>Depuis la 12c, une base conteneur (CDB) héberge une ou plusieurs bases enfichables (PDB). Chaque PDB a ses propres utilisateurs, schémas et données applicatives ; le conteneur racine (<code>CDB$ROOT</code>) porte le dictionnaire commun et les utilisateurs communs (préfixés <code>C##</code>). Les applications se connectent à une PDB par son nom de service. Depuis la 21c, l'architecture multitenant est la seule possible.</p></div></details>
+  <details class="qa"><summary>Comment retrouver rapidement la structure d'une table ou la liste de tes objets ?</summary><div><p><code>DESC table</code> dans l'outil client pour les colonnes ; sinon le dictionnaire : <code>USER_TAB_COLUMNS</code> pour les colonnes, <code>USER_OBJECTS</code> pour tous les objets avec leur type et leur statut (<code>VALID</code>/<code>INVALID</code>), <code>USER_CONSTRAINTS</code> pour les contraintes, <code>USER_SOURCE</code> pour le code PL/SQL stocké. Penser aux noms en majuscules dans les filtres.</p></div></details>
 </section>

@@ -2,16 +2,17 @@
 <section class="chapter" id="ch04" data-num="04" data-group="Accès aux données" data-min="75" data-title="SQL dans PL/SQL et curseurs" data-desc="SELECT INTO, DML et SQL%ROWCOUNT, curseurs explicites, FOR UPDATE, REF CURSOR et MERGE." hidden>
   <p class="eyebrow">Chapitre 04 · 75 min</p>
   <h1>SQL dans PL/SQL et curseurs</h1>
-  <p class="lead">Un curseur est une zone de travail où Oracle exécute une requête et garde sa position dans le résultat. Chaque ordre SQL de ton code en utilise un, que tu le déclares ou non.</p>
+  <p class="lead">Un curseur est une zone de travail où Oracle exécute une requête et garde sa position dans le résultat. Chaque ordre SQL de ton code en utilise un, que tu le déclares ou non. En entretien, on te demandera presque toujours la différence entre curseur implicite et explicite, les exceptions de <code>SELECT INTO</code> et le rôle de <code>FOR UPDATE</code>.</p>
   <ul class="goals">
     <li>utiliser <code>SELECT INTO</code> sans être surpris par ses deux exceptions ;</li>
     <li>lire les attributs <code>SQL%ROWCOUNT</code>, <code>%FOUND</code>, <code>%NOTFOUND</code>, <code>%ISOPEN</code> ;</li>
     <li>dérouler le cycle de vie d'un curseur explicite, puis le remplacer par une boucle <code>FOR</code> ;</li>
-    <li>verrouiller avec <code>FOR UPDATE</code> et renvoyer un résultat au client avec <code>SYS_REFCURSOR</code>.</li>
+    <li>verrouiller avec <code>FOR UPDATE</code> (et <code>SKIP LOCKED</code>) et renvoyer un résultat au client avec <code>SYS_REFCURSOR</code> ;</li>
+    <li>choisir le bon type de curseur selon la situation.</li>
   </ul>
 
   <h2>SELECT INTO : exactement une ligne</h2>
-  <p class="prose"><code>SELECT … INTO</code> est un curseur implicite qui doit ramener <strong>une et une seule</strong> ligne.</p>
+  <p class="prose"><code>SELECT … INTO</code> utilise un curseur implicite et doit ramener <strong>une et une seule</strong> ligne. Les variables de destination doivent correspondre en nombre et en type aux colonnes (ou être un record : <code>SELECT * INTO r_emp</code> avec <code>r_emp employes%ROWTYPE</code>).</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Lignes trouvées</th><th>Résultat</th></tr></thead>
     <tbody>
@@ -40,18 +41,19 @@
   </script>
   <div class="output">Aucun employé dans le 40
 Plusieurs employés dans le 20</div>
-  <div class="callout pitfall"><span class="ct">Piège classique d'entretien</span><p>Une requête d'agrégat sans <code>GROUP BY</code> renvoie <strong>toujours une ligne</strong>. <code>SELECT COUNT(*) INTO l_n FROM employes WHERE dept_id = 40</code> ne lève jamais <code>NO_DATA_FOUND</code> : <code>l_n</code> vaut 0. Et <code>SELECT MAX(salaire) …</code> sur zéro ligne donne <code>NULL</code>, sans exception.</p></div>
-  <div class="callout tip"><span class="ct">Astuce : tester l'existence</span><p>Pour savoir si une ligne existe, ne fais pas <code>COUNT(*)</code> sur toute la table. Préfère <code>SELECT COUNT(*) INTO l_n FROM employes WHERE emp_id = p_id AND ROWNUM = 1</code>, ou mieux : tente directement l'action et traite l'exception.</p></div>
+  <p class="prose">Les sous-blocs <code>BEGIN … EXCEPTION … END</code> permettent de traiter l'erreur sur place et de continuer. La gestion des exceptions est détaillée au <a href="#ch05">chapitre 05</a> ; pour charger plusieurs lignes d'un coup, on utilise <code>SELECT … BULK COLLECT INTO</code> (<a href="#ch09">chapitre 09</a>).</p>
+  <div class="callout pitfall"><span class="ct">Piège classique d'entretien</span><p>Une requête d'agrégat sans <code>GROUP BY</code> renvoie <strong>toujours une ligne</strong>. <code>SELECT COUNT(*) INTO l_n FROM employes WHERE dept_id = 40</code> ne lève jamais <code>NO_DATA_FOUND</code> : <code>l_n</code> vaut 0. Et <code>SELECT MAX(salaire) …</code> sur zéro ligne donne <code>NULL</code>, sans exception. À l'inverse, avec un <code>GROUP BY</code>, zéro groupe signifie zéro ligne, donc <code>NO_DATA_FOUND</code>.</p></div>
+  <div class="callout tip"><span class="ct">Astuce : tester l'existence</span><p>Pour savoir si au moins une ligne existe, ne compte pas tout : <code>SELECT COUNT(*) INTO l_n FROM employes WHERE dept_id = p_dept AND ROWNUM = 1</code> renvoie 0 ou 1 et s'arrête à la première ligne trouvée. Souvent, le plus simple reste de tenter directement l'action (un <code>UPDATE</code> puis <code>SQL%ROWCOUNT</code>) plutôt que de vérifier avant d'agir.</p></div>
 
   <h2>DML et curseur implicite</h2>
-  <p class="prose">Après chaque <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>MERGE</code> ou <code>SELECT INTO</code>, les attributs du curseur implicite <code>SQL</code> décrivent le <strong>dernier</strong> ordre exécuté.</p>
+  <p class="prose">Après chaque <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>MERGE</code> ou <code>SELECT INTO</code>, les attributs du curseur implicite <code>SQL</code> décrivent le <strong>dernier</strong> ordre exécuté. Tant qu'aucun ordre SQL n'a été exécuté, ils valent <code>NULL</code>.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Attribut</th><th>Signification</th></tr></thead>
     <tbody>
       <tr><td><code>SQL%ROWCOUNT</code></td><td>Nombre de lignes touchées par le dernier ordre</td></tr>
       <tr><td><code>SQL%FOUND</code></td><td><code>TRUE</code> si au moins une ligne a été touchée</td></tr>
       <tr><td><code>SQL%NOTFOUND</code></td><td><code>TRUE</code> si aucune ligne n'a été touchée</td></tr>
-      <tr><td><code>SQL%ISOPEN</code></td><td>Toujours <code>FALSE</code> : Oracle ferme le curseur implicite aussitôt</td></tr>
+      <tr><td><code>SQL%ISOPEN</code></td><td>Toujours <code>FALSE</code> : Oracle ferme le curseur implicite aussitôt l'ordre terminé</td></tr>
     </tbody>
   </table></div>
   <script type="text/plsql" data-title="SQL%ROWCOUNT et RETURNING INTO">
@@ -68,7 +70,7 @@ Plusieurs employés dans le 20</div>
 
       UPDATE employes SET salaire = salaire + 100 WHERE emp_id = 109
       RETURNING salaire INTO l_nouveau;          -- récupère la valeur sans relire la table
-      DBMS_OUTPUT.PUT_LINE('Nouveau salaire de 109 : ' || l_nouveau);
+      DBMS_OUTPUT.PUT_LINE('Nouveau salaire de 109 : ' || l_nouveau);   -- 1400 × 1,03 + 100
       ROLLBACK;
     END;
     /
@@ -76,10 +78,11 @@ Plusieurs employés dans le 20</div>
   <div class="output">5 salaires augmentés
 Employé 999 introuvable
 Nouveau salaire de 109 : 1542</div>
-  <div class="callout pitfall"><span class="ct">Piège</span><p>Lis <code>SQL%ROWCOUNT</code> <strong>immédiatement</strong> après l'ordre. Un appel de procédure qui exécute du SQL entre-temps l'écrase. Copie-le dans une variable si tu en as besoin plus loin.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Lis <code>SQL%ROWCOUNT</code> <strong>immédiatement</strong> après l'ordre. Un autre ordre SQL exécuté entre-temps, même caché dans une procédure appelée (un journal d'audit par exemple), l'écrase. Copie-le dans une variable si tu en as besoin plus loin.</p></div>
+  <div class="callout interview"><span class="ct">En entretien</span><p>« Un <code>UPDATE</code> qui ne trouve aucune ligne lève-t-il une exception ? » Non : seul <code>SELECT INTO</code> lève <code>NO_DATA_FOUND</code>. Pour un DML, c'est à toi de tester <code>SQL%ROWCOUNT = 0</code> ou <code>SQL%NOTFOUND</code> et de lever une erreur si c'est anormal.</p></div>
 
   <h2>Curseur explicite : le cycle de vie</h2>
-  <p class="prose">Pour parcourir plusieurs lignes, on déclare un curseur nommé. Son cycle de vie a quatre étapes : <strong>déclarer</strong>, <strong>ouvrir</strong> (la requête s'exécute et l'image des données est figée), <strong>lire</strong> ligne par ligne, <strong>fermer</strong>.</p>
+  <p class="prose">Pour parcourir plusieurs lignes, on déclare un curseur nommé. Son cycle de vie a quatre étapes : <strong>déclarer</strong>, <strong>ouvrir</strong> (la requête s'exécute et l'image des données est figée), <strong>lire</strong> ligne par ligne avec <code>FETCH</code>, <strong>fermer</strong>.</p>
   <div class="diagram">
     <pre class="mermaid">
 stateDiagram-v2
@@ -93,14 +96,47 @@ stateDiagram-v2
   Ferme --> Ouvert : OPEN c (nouvelle exécution)
   Ferme --> [*]
     </pre>
-    <p class="cap">FETCH sur un curseur fermé : INVALID_CURSOR (ORA-01001). OPEN sur un curseur ouvert : CURSOR_ALREADY_OPEN (ORA-06511).</p>
+    <p class="cap">FETCH sur un curseur fermé : INVALID_CURSOR (ORA-01001). OPEN sur un curseur déjà ouvert : CURSOR_ALREADY_OPEN (ORA-06511). Un FETCH sur un curseur épuisé ne lève rien : %NOTFOUND reste TRUE.</p>
   </div>
-  <p class="prose">Déroule l'exécution ligne à ligne : observe le pointeur sur le jeu de résultats et la valeur de <code>%NOTFOUND</code>.</p>
+  <p class="prose">Déroule l'exécution ligne à ligne : observe le pointeur sur le jeu de résultats et l'évolution des attributs <code>%ISOPEN</code>, <code>%NOTFOUND</code> et <code>%ROWCOUNT</code>.</p>
   <div data-stepper="cursor"></div>
   <div class="callout pitfall"><span class="ct">Piège : où placer EXIT WHEN</span><p>Le <code>EXIT WHEN c%NOTFOUND</code> doit suivre <strong>immédiatement</strong> le <code>FETCH</code>. Si tu le mets en fin de boucle, la dernière ligne est traitée deux fois : le <code>FETCH</code> qui échoue ne vide pas les variables, elles gardent la valeur précédente.</p></div>
 
+  <h3>Attributs d'un curseur explicite</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Attribut</th><th>Avant OPEN</th><th>Après OPEN, avant le 1<sup>er</sup> FETCH</th><th>Après un FETCH réussi</th><th>Après le FETCH qui échoue</th><th>Après CLOSE</th></tr></thead>
+    <tbody>
+      <tr><td><code>%ISOPEN</code></td><td>FALSE</td><td>TRUE</td><td>TRUE</td><td>TRUE</td><td>FALSE</td></tr>
+      <tr><td><code>%FOUND</code></td><td>INVALID_CURSOR</td><td>NULL</td><td>TRUE</td><td>FALSE</td><td>INVALID_CURSOR</td></tr>
+      <tr><td><code>%NOTFOUND</code></td><td>INVALID_CURSOR</td><td>NULL</td><td>FALSE</td><td>TRUE</td><td>INVALID_CURSOR</td></tr>
+      <tr><td><code>%ROWCOUNT</code></td><td>INVALID_CURSOR</td><td>0</td><td>lignes lues jusqu'ici</td><td>total des lignes lues</td><td>INVALID_CURSOR</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose"><code>%ROWCOUNT</code> compte les lignes <strong>déjà lues</strong>, pas la taille du résultat : Oracle ne connaît le total qu'une fois le curseur épuisé.</p>
+
+  <h3>Le résultat est figé à l'OPEN</h3>
+  <p class="prose">Grâce à la lecture cohérente d'Oracle, un curseur voit les données telles qu'elles étaient au moment de son <code>OPEN</code>, même si ta propre session les modifie ensuite.</p>
+  <script type="text/plsql" data-title="Lecture cohérente d'un curseur">
+    DECLARE
+      CURSOR c IS SELECT salaire FROM employes WHERE emp_id = 109;
+      l_sal employes.salaire%TYPE;
+    BEGIN
+      OPEN c;                                              -- l'image des données est prise ici
+      UPDATE employes SET salaire = 2000 WHERE emp_id = 109;
+      FETCH c INTO l_sal;
+      DBMS_OUTPUT.PUT_LINE('Lu par le curseur : ' || l_sal);
+      CLOSE c;
+      SELECT salaire INTO l_sal FROM employes WHERE emp_id = 109;
+      DBMS_OUTPUT.PUT_LINE('Relu ensuite : ' || l_sal);
+      ROLLBACK;
+    END;
+    /
+  </script>
+  <div class="output">Lu par le curseur : 1400
+Relu ensuite : 2000</div>
+
   <h3>La boucle FOR de curseur (à préférer)</h3>
-  <p class="prose">Elle fait <code>OPEN</code>, <code>FETCH</code>, test de fin et <code>CLOSE</code> pour toi, même si une exception interrompt la boucle. Depuis 10g, avec l'optimisation par défaut, elle lit même les lignes par paquets de 100 en interne.</p>
+  <p class="prose">Elle fait <code>OPEN</code>, <code>FETCH</code>, test de fin et <code>CLOSE</code> pour toi, et ferme le curseur même si une exception interrompt la boucle. Le record de boucle (<code>r</code>) est déclaré implicitement avec la forme de la requête. Depuis 10g, avec l'optimisation par défaut (<code>PLSQL_OPTIMIZE_LEVEL</code> à 2 ou plus), elle lit même les lignes par paquets de 100 en interne.</p>
   <script type="text/plsql" data-title="Boucle FOR, curseur déclaré ou en ligne">
     DECLARE
       CURSOR c_dept (p_dept_id departements.dept_id%TYPE) IS   -- curseur paramétré
@@ -126,35 +162,60 @@ Direction     1
 Informatique  5
 RH            0
 Ventes        4</div>
-  <div class="callout tip"><span class="ct">Astuce</span><p>Dans un curseur, toute expression calculée doit avoir un <strong>alias</strong> (<code>COUNT(e.emp_id) nb</code>), sinon tu ne peux pas la lire depuis le record.</p></div>
-
-  <h3>Attributs d'un curseur explicite</h3>
-  <p class="prose"><code>c%ISOPEN</code>, <code>c%FOUND</code>, <code>c%NOTFOUND</code> et <code>c%ROWCOUNT</code> (nombre de lignes lues <em>jusqu'ici</em>, pas le total). Avant le premier <code>FETCH</code>, <code>%FOUND</code> et <code>%NOTFOUND</code> valent <code>NULL</code>.</p>
+  <div class="callout tip"><span class="ct">Astuce</span><p>Dans un curseur, toute expression calculée doit avoir un <strong>alias</strong> (<code>COUNT(e.emp_id) nb</code>), sinon tu ne peux pas la lire depuis le record. Note aussi le <code>COUNT(e.emp_id)</code> et non <code>COUNT(*)</code> : avec la jointure externe, <code>COUNT(*)</code> compterait 1 pour le département RH.</p></div>
+  <div class="callout pitfall"><span class="ct">Piège</span><p>Après la boucle <code>FOR</code>, le curseur est déjà fermé : <code>c_dept%ROWCOUNT</code> lève alors <code>INVALID_CURSOR</code>. Si tu as besoin du nombre de lignes traitées, lis <code>c_dept%ROWCOUNT</code> <em>dans</em> la boucle ou incrémente un compteur. Le record <code>r</code> n'existe pas non plus hors de la boucle.</p></div>
 
   <h2>Verrouiller pour mettre à jour : FOR UPDATE</h2>
-  <p class="prose"><code>FOR UPDATE</code> pose un verrou sur les lignes sélectionnées dès l'<code>OPEN</code>, jusqu'au <code>COMMIT</code> ou <code>ROLLBACK</code>. <code>WHERE CURRENT OF</code> met ensuite à jour la ligne courante sans la rechercher.</p>
+  <p class="prose"><code>FOR UPDATE</code> pose un verrou sur toutes les lignes sélectionnées dès l'<code>OPEN</code> (sauf avec <code>SKIP LOCKED</code>, voir plus bas), jusqu'au <code>COMMIT</code> ou <code>ROLLBACK</code>. Personne ne peut les modifier entre ta lecture et ta mise à jour : c'est la protection contre la <em>mise à jour perdue</em>. <code>WHERE CURRENT OF</code> met ensuite à jour la ligne courante via son ROWID, sans la rechercher.</p>
   <script type="text/plsql" data-title="FOR UPDATE … WHERE CURRENT OF">
     DECLARE
       CURSOR c_com IS
-        SELECT emp_id, salaire, commission
+        SELECT nom, salaire, commission
           FROM employes
          WHERE poste = 'COMMERCIAL'
+         ORDER BY emp_id
            FOR UPDATE OF commission NOWAIT;   -- échoue tout de suite (ORA-00054) si déjà verrouillé
     BEGIN
       FOR r IN c_com LOOP
         UPDATE employes
            SET commission = NVL(r.commission, 0) + r.salaire * 0.05
          WHERE CURRENT OF c_com;
+        DBMS_OUTPUT.PUT_LINE(r.nom || ' : ' || (NVL(r.commission, 0) + r.salaire * 0.05));
       END LOOP;
-      COMMIT;                                 -- libère les verrous
+      ROLLBACK;            -- en production : COMMIT, qui libère les verrous
     END;
     /
   </script>
-  <p class="prose">Variantes : <code>WAIT n</code> attend au plus n secondes ; <code>SKIP LOCKED</code> ignore les lignes déjà verrouillées (parfait pour une file de traitements partagée entre plusieurs sessions).</p>
-  <div class="callout pitfall"><span class="ct">Piège</span><p>Un <code>COMMIT</code> <strong>à l'intérieur</strong> d'une boucle sur un curseur <code>FOR UPDATE</code> libère les verrous ; le <code>FETCH</code> suivant lève <code>ORA-01002: fetch out of sequence</code>.</p></div>
+  <div class="output">Simon : 605
+Laurent : 745
+Michel : 150</div>
+  <p class="prose">Variantes de la clause : sans option, la session <strong>attend</strong> indéfiniment que les lignes se libèrent ; <code>NOWAIT</code> échoue aussitôt (ORA-00054) ; <code>WAIT n</code> attend au plus n secondes (puis ORA-30006) ; <code>SKIP LOCKED</code> ignore les lignes déjà verrouillées. Dans une jointure, <code>FOR UPDATE OF colonne</code> ne verrouille que les lignes des tables dont tu cites une colonne.</p>
+  <div class="callout pitfall"><span class="ct">Piège</span><p><code>WHERE CURRENT OF</code> exige un curseur déclaré <code>FOR UPDATE</code> (sinon erreur de compilation PLS-00404). Et un <code>COMMIT</code> <strong>à l'intérieur</strong> de la boucle libère tous les verrous du curseur, qui ne peut alors plus être lu : avec <code>OPEN</code> / <code>FETCH</code>, le <code>FETCH</code> suivant lève <code>ORA-01002: fetch out of sequence</code>. Avec une boucle <code>FOR</code>, qui lit par paquets, l'erreur peut n'apparaître que plus tard, voire pas du tout sur un petit résultat de test : le code reste faux, car les lignes restantes ne sont plus protégées. On valide après la boucle.</p></div>
+
+  <h3>SKIP LOCKED : une file de travaux partagée</h3>
+  <p class="prose">Quand plusieurs sessions traitent la même liste de tâches, <code>SKIP LOCKED</code> (documenté depuis 11g) permet à chacune de prendre les lignes libres sans attendre les autres. Contrairement au <code>FOR UPDATE</code> classique, les verrous ne sont pas posés à l'<code>OPEN</code> mais au <code>FETCH</code> : seules les lignes effectivement lues sont verrouillées.</p>
+  <script type="text/plsql" data-title="Deux sessions, aucune attente">
+    -- Session A : verrouille Simon (106) sans valider
+    UPDATE employes SET commission = 500 WHERE emp_id = 106;
+
+    -- Session B, pendant ce temps :
+    BEGIN
+      FOR r IN (SELECT emp_id, nom FROM employes
+                 WHERE poste = 'COMMERCIAL'
+                 ORDER BY emp_id
+                   FOR UPDATE SKIP LOCKED) LOOP
+        DBMS_OUTPUT.PUT_LINE('B traite ' || r.nom);
+      END LOOP;
+      ROLLBACK;
+    END;
+    /
+  </script>
+  <div class="output">B traite Laurent
+B traite Michel</div>
+  <div class="callout pitfall"><span class="ct">Piège : SKIP LOCKED et ROWNUM</span><p><code>WHERE ROWNUM &lt;= 1 FOR UPDATE SKIP LOCKED</code> ne donne pas « la première ligne libre » : <code>ROWNUM</code> est appliqué avant le saut des lignes verrouillées. Si la première ligne est prise, la session B ne reçoit <strong>rien</strong>. Pour prendre n lignes libres, ouvre le curseur sans limite et ne lis que n lignes (<code>FETCH … BULK COLLECT … LIMIT n</code>, voir <a href="#ch09">chapitre 09</a>).</p></div>
 
   <h2>Curseurs variables : REF CURSOR</h2>
-  <p class="prose">Un curseur classique est lié à une requête fixe. Une variable curseur (<code>REF CURSOR</code>) est un <strong>pointeur</strong> vers un curseur : on peut l'ouvrir sur des requêtes différentes et surtout le <strong>renvoyer au client</strong> (Java, .NET, Python), qui lira les lignes lui-même. <code>SYS_REFCURSOR</code> est un type faible prédéfini.</p>
+  <p class="prose">Un curseur classique est lié à une requête fixe. Une variable curseur (<code>REF CURSOR</code>) est un <strong>pointeur</strong> vers un curseur : on peut l'ouvrir sur des requêtes différentes (y compris du SQL dynamique, <a href="#ch11">chapitre 11</a>) et surtout le <strong>renvoyer au client</strong> (Java, .NET, Python), qui lira les lignes lui-même, au fil de l'eau. <code>SYS_REFCURSOR</code> est un type faible prédéfini.</p>
   <script type="text/plsql" data-title="Fonction qui renvoie un SYS_REFCURSOR">
     CREATE OR REPLACE FUNCTION employes_du_dept (p_dept_id IN NUMBER)
       RETURN SYS_REFCURSOR
@@ -187,28 +248,57 @@ Ventes        4</div>
     END;
     /
   </script>
+  <div class="output">101 Bernard
+103 Durand
+109 Garcia
+104 Leroy
+102 Petit</div>
+  <p class="prose">Une variable curseur ne s'utilise pas dans une boucle <code>FOR … IN</code> : on la lit avec <code>FETCH</code> (ligne par ligne ou en masse) et on la ferme avec <code>CLOSE</code>.</p>
   <div class="table-wrap"><table>
     <thead><tr><th></th><th>REF CURSOR fort</th><th>REF CURSOR faible / SYS_REFCURSOR</th></tr></thead>
     <tbody>
       <tr><td>Déclaration</td><td><code>TYPE t_rc IS REF CURSOR RETURN employes%ROWTYPE;</code></td><td><code>TYPE t_rc IS REF CURSOR;</code> ou directement <code>SYS_REFCURSOR</code></td></tr>
-      <tr><td>Contrôle</td><td>Structure vérifiée à la compilation</td><td>N'importe quelle requête, erreur éventuelle à l'exécution</td></tr>
+      <tr><td>Contrôle</td><td>Structure vérifiée à la compilation</td><td>N'importe quelle requête, erreur éventuelle à l'exécution (ROWTYPE_MISMATCH au <code>FETCH</code>)</td></tr>
       <tr><td>Usage</td><td>API internes typées</td><td>Renvoyer des résultats aux applications, SQL dynamique</td></tr>
     </tbody>
   </table></div>
-  <div class="callout pitfall"><span class="ct">Piège</span><p>Un curseur jamais fermé reste ouvert jusqu'à la fin de la session. À force : <code>ORA-01000: maximum open cursors exceeded</code>. Ferme toujours un curseur explicite ou une variable curseur, y compris dans le bloc <code>EXCEPTION</code> (<code>IF c%ISOPEN THEN CLOSE c; END IF;</code>).</p></div>
+  <div class="callout pitfall"><span class="ct">Piège : fuite de curseurs</span><p>Une variable curseur renvoyée à l'appelant, ou un curseur déclaré dans un <em>package</em>, reste ouvert jusqu'à sa fermeture ou la fin de la session (un curseur explicite déclaré dans un bloc local est, lui, fermé automatiquement quand ce bloc se termine). À force : <code>ORA-01000: maximum open cursors exceeded</code>. Ferme toujours explicitement ce que tu ouvres, y compris dans le bloc <code>EXCEPTION</code> (<code>IF c%ISOPEN THEN CLOSE c; END IF;</code>), et vérifie que le code client ferme bien les curseurs qu'il reçoit.</p></div>
+  <div class="callout tip"><span class="ct">Pour aller plus loin</span><p>Une <em>expression de curseur</em> <code>CURSOR(SELECT …)</code> placée dans la liste d'un <code>SELECT</code> renvoie, pour chaque ligne, un curseur imbriqué : utile pour envoyer une structure maître-détail à un client en un seul appel. Depuis 12c, <code>DBMS_SQL.RETURN_RESULT</code> permet aussi à une procédure de renvoyer un résultat au client sans paramètre <code>OUT</code> (pratique pour les migrations depuis SQL Server).</p></div>
 
   <h2>MERGE : insérer ou mettre à jour en un ordre</h2>
   <script type="text/plsql" data-title="MERGE (« upsert »)">
-    MERGE INTO employes e
-    USING (SELECT 110 AS emp_id, 'Roux' AS nom, 'DEV' AS poste, 3600 AS salaire, 20 AS dept_id FROM dual) s
-       ON (e.emp_id = s.emp_id)
-     WHEN MATCHED THEN
-       UPDATE SET e.salaire = s.salaire, e.poste = s.poste
-     WHEN NOT MATCHED THEN
-       INSERT (emp_id, nom, poste, salaire, dept_id, manager_id)
-       VALUES (s.emp_id, s.nom, s.poste, s.salaire, s.dept_id, 101);
+    BEGIN
+      MERGE INTO employes e
+      USING (SELECT 110 AS emp_id, 'Roux' AS nom, 'DEV' AS poste,
+                    3600 AS salaire, 20 AS dept_id
+               FROM dual) s
+         ON (e.emp_id = s.emp_id)
+       WHEN MATCHED THEN
+         UPDATE SET e.salaire = s.salaire, e.poste = s.poste
+       WHEN NOT MATCHED THEN
+         INSERT (emp_id, nom, poste, salaire, dept_id, manager_id)
+         VALUES (s.emp_id, s.nom, s.poste, s.salaire, s.dept_id, 101);
+      DBMS_OUTPUT.PUT_LINE(SQL%ROWCOUNT || ' ligne(s) fusionnée(s)');
+      ROLLBACK;
+    END;
+    /
   </script>
-  <p class="prose">Un seul ordre SQL remplace le schéma « <code>UPDATE</code>, puis <code>INSERT</code> si <code>SQL%ROWCOUNT = 0</code> », qui demande deux passages et n'est pas sûr en concurrence.</p>
+  <div class="output">1 ligne(s) fusionnée(s)</div>
+  <p class="prose">Un seul ordre SQL remplace le schéma « <code>UPDATE</code>, puis <code>INSERT</code> si <code>SQL%ROWCOUNT = 0</code> », qui demande deux allers-retours vers le moteur SQL. <code>SQL%ROWCOUNT</code> compte ensemble les lignes mises à jour et insérées.</p>
+  <div class="callout pitfall"><span class="ct">Pièges de MERGE</span><p>On ne peut pas mettre à jour une colonne utilisée dans la clause <code>ON</code> (ORA-38104). Si la source contient deux lignes pour la même cible, Oracle lève ORA-30926 (« unable to get a stable set of rows »). Enfin, <code>MERGE</code> n'élimine pas toute concurrence : si deux sessions insèrent la même clé nouvelle en même temps, l'une reçoit <code>DUP_VAL_ON_INDEX</code> (ORA-00001), qu'il faut prévoir.</p></div>
+
+  <h2>Récapitulatif : quel curseur choisir ?</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Besoin</th><th>Outil</th><th>Attributs</th></tr></thead>
+    <tbody>
+      <tr><td>Lire exactement une ligne</td><td><code>SELECT … INTO</code> (curseur implicite)</td><td><code>SQL%…</code></td></tr>
+      <tr><td>Modifier des lignes</td><td><code>INSERT</code> / <code>UPDATE</code> / <code>DELETE</code> / <code>MERGE</code> (implicite)</td><td><code>SQL%ROWCOUNT</code></td></tr>
+      <tr><td>Parcourir n lignes, cas courant</td><td>Boucle <code>FOR r IN (SELECT …)</code> ou <code>FOR r IN c</code></td><td>Aucun à gérer</td></tr>
+      <tr><td>Contrôle fin, lecture par lots</td><td>Curseur explicite <code>OPEN</code> / <code>FETCH</code> / <code>CLOSE</code></td><td><code>c%…</code></td></tr>
+      <tr><td>Renvoyer un résultat au client, requête variable</td><td><code>SYS_REFCURSOR</code></td><td><code>rc%…</code></td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout interview"><span class="ct">En entretien</span><p>Ajoute toujours que le meilleur curseur est souvent… pas de curseur du tout : un seul <code>UPDATE</code> ou <code>INSERT … SELECT</code> ensembliste bat une boucle ligne par ligne (« <em>row by row is slow by slow</em> »). Le <a href="#ch09">chapitre 09</a> traite les cas où la boucle est inévitable.</p></div>
 
   <h2>Exercices</h2>
   <div class="ex" data-ex="ch04-e1">
@@ -219,26 +309,30 @@ Ventes        4</div>
         <script type="text/plsql" data-title="Solution">
           DECLARE
             l_dept departements.dept_id%TYPE := 40;
+            l_nb   PLS_INTEGER;
           BEGIN
             UPDATE employes SET salaire = ROUND(salaire * 1.02, 2) WHERE dept_id = l_dept;
-            IF SQL%ROWCOUNT = 0 THEN
+            l_nb := SQL%ROWCOUNT;              -- copié tout de suite
+            IF l_nb = 0 THEN
               DBMS_OUTPUT.PUT_LINE('Département vide ou inexistant');
             ELSE
-              DBMS_OUTPUT.PUT_LINE(SQL%ROWCOUNT || ' employé(s) augmenté(s)');
+              DBMS_OUTPUT.PUT_LINE(l_nb || ' employé(s) augmenté(s)');
             END IF;
             ROLLBACK;
           END;
           /
         </script>
+        <div class="output">Département vide ou inexistant</div>
+        <p class="hint">Avec <code>l_dept := 30</code>, le bloc affiche <code>4 employé(s) augmenté(s)</code>. L'<code>UPDATE</code> sans ligne ne lève aucune exception : c'est le test sur <code>SQL%ROWCOUNT</code> qui détecte le cas.</p>
       </details>
     </div>
   </div>
   <div class="ex" data-ex="ch04-e2">
     <div class="ex-head"><h4>Exercice 2 · Organigramme avec curseur explicite</h4><span class="lvl l2">moyen</span></div>
     <div class="ex-body">
-      <p>Avec un curseur explicite (<code>OPEN</code> / <code>FETCH</code> / <code>CLOSE</code>), affiche chaque employé suivi du nom de son manager (<code>Petit → Bernard</code>, et <code>Martin → (aucun)</code> pour la DG). Affiche à la fin le nombre de lignes lues grâce à <code>%ROWCOUNT</code>. Réécris ensuite le même code avec une boucle <code>FOR</code>.</p>
+      <p>Avec un curseur explicite (<code>OPEN</code> / <code>FETCH</code> / <code>CLOSE</code>), affiche chaque employé suivi du nom de son manager (<code>Petit → Bernard</code>, et <code>Martin → (aucun)</code> pour la DG), par numéro d'employé croissant. Affiche à la fin le nombre de lignes lues grâce à <code>%ROWCOUNT</code>. Réécris ensuite le même code avec une boucle <code>FOR</code>.</p>
       <details class="sol"><summary>Voir la solution</summary>
-        <script type="text/plsql" data-title="Solution — version explicite">
+        <script type="text/plsql" data-title="Solution : version explicite">
           DECLARE
             CURSOR c_org IS
               SELECT e.nom, m.nom AS manager
@@ -257,7 +351,18 @@ Ventes        4</div>
           END;
           /
         </script>
-        <script type="text/plsql" data-title="Solution — version FOR">
+        <div class="output">Martin → (aucun)
+Bernard → Martin
+Petit → Bernard
+Durand → Bernard
+Leroy → Bernard
+Moreau → Martin
+Simon → Moreau
+Laurent → Moreau
+Michel → Moreau
+Garcia → Petit
+10 lignes</div>
+        <script type="text/plsql" data-title="Solution : version FOR">
           BEGIN
             FOR r IN (SELECT e.nom, m.nom AS manager
                         FROM employes e LEFT JOIN employes m ON m.emp_id = e.manager_id
@@ -267,14 +372,14 @@ Ventes        4</div>
           END;
           /
         </script>
-        <p class="hint">Lire <code>c_org%ROWCOUNT</code> après <code>CLOSE</code> lève <code>INVALID_CURSOR</code>. La jointure externe est nécessaire, sinon la DG (sans manager) disparaît.</p>
+        <p class="hint">Lire <code>c_org%ROWCOUNT</code> après <code>CLOSE</code> lève <code>INVALID_CURSOR</code>. La jointure externe est nécessaire, sinon la DG (sans manager) disparaît. L'alias <code>manager</code> est obligatoire : deux colonnes ne peuvent pas s'appeler <code>nom</code> dans le record.</p>
       </details>
     </div>
   </div>
   <div class="ex" data-ex="ch04-e3">
     <div class="ex-head"><h4>Exercice 3 · API de recherche</h4><span class="lvl l2">moyen</span></div>
     <div class="ex-body">
-      <p>Crée une fonction <code>rechercher_employes(p_poste VARCHAR2, p_sal_min NUMBER)</code> qui renvoie un <code>SYS_REFCURSOR</code> des employés filtrés. Si <code>p_poste</code> est NULL, tous les postes sont acceptés. Teste-la en SQL Developer avec <code>SELECT rechercher_employes('DEV', 0) FROM dual;</code> ou avec <code>VARIABLE rc REFCURSOR</code> / <code>PRINT rc</code>.</p>
+      <p>Crée une fonction <code>rechercher_employes(p_poste VARCHAR2, p_sal_min NUMBER)</code> qui renvoie un <code>SYS_REFCURSOR</code> des employés filtrés, du mieux payé au moins payé. Si <code>p_poste</code> est NULL, tous les postes sont acceptés. Teste-la en SQL Developer avec <code>SELECT rechercher_employes('DEV', 0) FROM dual;</code> ou avec <code>VARIABLE rc REFCURSOR</code> / <code>PRINT rc</code>.</p>
       <details class="sol"><summary>Voir la solution</summary>
         <script type="text/plsql" data-title="Solution">
           CREATE OR REPLACE FUNCTION rechercher_employes (
@@ -298,13 +403,14 @@ Ventes        4</div>
           EXEC :rc := rechercher_employes(NULL, 4000);
           PRINT rc
         </script>
+        <p class="hint">Le <code>PRINT</code> affiche 5 lignes : Martin 9500, Bernard 7200, Moreau 6800, Leroy 4800, Petit 4300. La condition <code>(p_poste IS NULL OR poste = p_poste)</code> est la façon classique de rendre un filtre optionnel en SQL statique ; quand les filtres optionnels se multiplient, le SQL dynamique avec variables liées (<a href="#ch11">chapitre 11</a>) donne souvent de meilleurs plans d'exécution.</p>
       </details>
     </div>
   </div>
   <div class="ex" data-ex="ch04-e4">
     <div class="ex-head"><h4>Exercice 4 · Trouver le bug</h4><span class="lvl l3">difficile</span></div>
     <div class="ex-body">
-      <p>Ce code affiche le dernier employé du département 10 deux fois. Pourquoi ? Il y a aussi un risque de fuite de curseur : lequel ?</p>
+      <p>Ce code affiche <code>Martin</code> deux fois alors que le département 10 n'a qu'un employé. Pourquoi ? Il y a aussi un risque de fuite de curseur : lequel ?</p>
       <script type="text/plsql" data-title="Code buggé">
         DECLARE
           CURSOR c IS SELECT nom FROM employes WHERE dept_id = 10;
@@ -320,9 +426,55 @@ Ventes        4</div>
         END;
         /
       </script>
+      <div class="output">Martin
+Martin</div>
       <details class="sol"><summary>Voir la solution</summary>
-        <p>Le test de sortie est placé <strong>après</strong> l'affichage. Au dernier tour, le <code>FETCH</code> ne trouve rien mais <code>l_nom</code> garde la valeur précédente, qui est réaffichée. Il faut <code>EXIT WHEN c%NOTFOUND;</code> juste après le <code>FETCH</code>.</p>
-        <p>Fuite : si une exception survient entre <code>OPEN</code> et <code>CLOSE</code>, le curseur n'est jamais fermé. Ajoute une section <code>EXCEPTION WHEN OTHERS THEN IF c%ISOPEN THEN CLOSE c; END IF; RAISE;</code> ou, plus simplement, utilise une boucle <code>FOR</code>.</p>
+        <p>Le test de sortie est placé <strong>après</strong> l'affichage. Au deuxième tour, le <code>FETCH</code> ne trouve rien mais <code>l_nom</code> garde la valeur précédente, qui est réaffichée. Il faut <code>EXIT WHEN c%NOTFOUND;</code> juste après le <code>FETCH</code>.</p>
+        <p>Fuite : si une exception survient entre <code>OPEN</code> et <code>CLOSE</code>, le <code>CLOSE</code> n'est jamais exécuté. Ici le curseur est local, donc PL/SQL le fermera en sortant du bloc, mais la même structure sur un curseur de <em>package</em> ou une variable curseur le laisserait ouvert jusqu'à la fin de la session. Prends la bonne habitude : ajoute une section <code>EXCEPTION WHEN OTHERS THEN IF c%ISOPEN THEN CLOSE c; END IF; RAISE;</code> ou, plus simplement, utilise une boucle <code>FOR</code> qui ferme le curseur dans tous les cas.</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch04-e5">
+    <div class="ex-head"><h4>Exercice 5 · Au-dessus de la moyenne, par département</h4><span class="lvl l3">difficile</span></div>
+    <div class="ex-body">
+      <p>Pour chaque département (curseur externe, par numéro croissant), affiche son nom puis, indentés de deux espaces, les employés payés <strong>strictement</strong> au-dessus de la moyenne de leur département, du mieux payé au moins payé. Utilise un curseur paramétré pour la liste interne. Si personne ne dépasse la moyenne, affiche <code>  (aucun)</code>.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          DECLARE
+            CURSOR c_dept IS
+              SELECT dept_id, nom FROM departements ORDER BY dept_id;
+            CURSOR c_emp (p_dept_id departements.dept_id%TYPE) IS
+              SELECT nom, salaire
+                FROM employes
+               WHERE dept_id = p_dept_id
+                 AND salaire > (SELECT AVG(salaire) FROM employes WHERE dept_id = p_dept_id)
+               ORDER BY salaire DESC;
+            l_nb PLS_INTEGER;
+          BEGIN
+            FOR d IN c_dept LOOP
+              DBMS_OUTPUT.PUT_LINE(d.nom);
+              l_nb := 0;
+              FOR e IN c_emp(d.dept_id) LOOP
+                l_nb := c_emp%ROWCOUNT;          -- lisible DANS la boucle seulement
+                DBMS_OUTPUT.PUT_LINE('  ' || e.nom || ' ' || e.salaire);
+              END LOOP;
+              IF l_nb = 0 THEN
+                DBMS_OUTPUT.PUT_LINE('  (aucun)');
+              END IF;
+            END LOOP;
+          END;
+          /
+        </script>
+        <div class="output">Direction
+  (aucun)
+Informatique
+  Bernard 7200
+  Leroy 4800
+Ventes
+  Moreau 6800
+RH
+  (aucun)</div>
+        <p class="hint">Direction : Martin est seul, il est égal à la moyenne, pas au-dessus. Informatique : moyenne 4 320. Ventes : moyenne 3 950. RH : la moyenne vaut NULL et aucune comparaison avec NULL n'est vraie. Le curseur interne est rouvert avec un nouveau paramètre à chaque tour : c'est le principe du curseur paramétré. En vrai, une seule requête avec <code>AVG(salaire) OVER (PARTITION BY dept_id)</code> ferait le même travail sans boucles imbriquées.</p>
       </details>
     </div>
   </div>
@@ -331,8 +483,9 @@ Ventes        4</div>
   <div data-quiz="ch04"></div>
 
   <h2>Questions d'entretien</h2>
-  <details class="qa"><summary>Différence entre curseur implicite et explicite ?</summary><div><p>Le curseur implicite est créé et géré par Oracle pour chaque ordre SQL (<code>SELECT INTO</code>, DML) ; on lit ses attributs via <code>SQL%</code>. Le curseur explicite est déclaré par le développeur pour une requête multi-lignes, avec un contrôle complet du cycle <code>OPEN</code> / <code>FETCH</code> / <code>CLOSE</code> et des attributs <code>nom%</code>. La boucle <code>FOR</code> de curseur combine les deux avantages : curseur nommé ou en ligne, gestion automatique.</p></div></details>
-  <details class="qa"><summary>Qu'est-ce qu'un REF CURSOR et à quoi sert-il ?</summary><div><p>Une variable qui pointe vers un curseur ouvert. Elle permet d'ouvrir des requêtes différentes à l'exécution (y compris dynamiques) et surtout de passer un jeu de résultats d'une procédure stockée à une application cliente sans tout charger en mémoire.</p></div></details>
-  <details class="qa"><summary>À quoi servent FOR UPDATE et WHERE CURRENT OF ?</summary><div><p><code>FOR UPDATE</code> verrouille les lignes à l'ouverture du curseur pour éviter qu'une autre session ne les modifie entre la lecture et la mise à jour (mise à jour perdue). <code>WHERE CURRENT OF</code> cible la ligne courante du curseur via son ROWID, sans nouvelle recherche.</p></div></details>
-  <details class="qa"><summary>Que renvoie SQL%ROWCOUNT après un SELECT INTO réussi ?</summary><div><p>1. Après un <code>SELECT INTO</code> qui lève <code>TOO_MANY_ROWS</code>, il vaut aussi 1 (Oracle s'arrête à la deuxième ligne, qu'il ne compte pas comme lue).</p></div></details>
+  <details class="qa"><summary>Différence entre curseur implicite et explicite ?</summary><div><p>Le curseur implicite est créé et géré par Oracle pour chaque ordre SQL (<code>SELECT INTO</code>, DML) ; on lit ses attributs via <code>SQL%</code>, qui décrivent toujours le dernier ordre exécuté. Le curseur explicite est déclaré par le développeur pour une requête multi-lignes, avec un contrôle complet du cycle <code>OPEN</code> / <code>FETCH</code> / <code>CLOSE</code> et des attributs <code>nom%</code>. La boucle <code>FOR</code> de curseur combine les deux avantages : curseur nommé ou en ligne, ouverture et fermeture automatiques, lecture par paquets de 100. Elle est le choix par défaut ; on garde l'explicite pour le <code>FETCH … BULK COLLECT LIMIT</code> ou un contrôle fin.</p></div></details>
+  <details class="qa"><summary>Qu'est-ce qu'un REF CURSOR et à quoi sert-il ?</summary><div><p>Une variable qui pointe vers un curseur ouvert. Elle permet d'ouvrir des requêtes différentes à l'exécution (y compris dynamiques) et surtout de passer un jeu de résultats d'une procédure stockée à une application cliente, qui lit les lignes au fil de l'eau sans tout charger en mémoire côté serveur. Fort : structure vérifiée à la compilation. Faible (<code>SYS_REFCURSOR</code>) : n'importe quelle requête. L'appelant doit le fermer.</p></div></details>
+  <details class="qa"><summary>À quoi servent FOR UPDATE et WHERE CURRENT OF ?</summary><div><p><code>FOR UPDATE</code> verrouille les lignes à l'ouverture du curseur pour éviter qu'une autre session ne les modifie entre la lecture et la mise à jour (mise à jour perdue). Les verrous tiennent jusqu'au <code>COMMIT</code> ou <code>ROLLBACK</code> ; un <code>COMMIT</code> dans la boucle libère tous les verrous et un <code>FETCH</code> ultérieur sur ce curseur lève ORA-01002. <code>WHERE CURRENT OF</code> cible la ligne courante du curseur via son ROWID, sans nouvelle recherche. Options : <code>NOWAIT</code>, <code>WAIT n</code>, <code>SKIP LOCKED</code>.</p></div></details>
+  <details class="qa"><summary>Comment plusieurs sessions peuvent-elles traiter une même table de tâches sans se bloquer ?</summary><div><p>Avec <code>SELECT … FOR UPDATE SKIP LOCKED</code> : chaque session verrouille les lignes libres et saute celles déjà prises par les autres, sans attendre. Point à citer : ne pas limiter avec <code>ROWNUM</code> (appliqué avant le saut des lignes verrouillées), mais ouvrir le curseur et ne lire que le nombre de lignes voulu (<code>FETCH … LIMIT n</code>).</p></div></details>
+  <details class="qa"><summary>Que renvoie SQL%ROWCOUNT après un SELECT INTO ?</summary><div><p>1 s'il a réussi, 0 s'il a levé <code>NO_DATA_FOUND</code>. Cas piège : quand il lève <code>TOO_MANY_ROWS</code>, <code>SQL%ROWCOUNT</code> vaut aussi 1 (comportement documenté par Oracle), et non le nombre réel de lignes qui satisfont la requête.</p></div></details>
 </section>

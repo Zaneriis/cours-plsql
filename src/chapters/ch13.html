@@ -1,12 +1,14 @@
 <!-- ===================================================== CH 13 ===================================================== -->
-<section class="chapter" id="ch13" data-num="13" data-group="Entretien" data-min="90" data-title="Spécial entretien" data-desc="Flashcards, rappels SQL incontournables, pièges classiques, cas pratique chronométré et check-list de la veille." hidden>
+<section class="chapter" id="ch13" data-num="13" data-group="Entretien" data-min="90" data-title="Spécial entretien" data-desc="Flashcards, rappels SQL incontournables, pièges classiques, cas pratiques chronométrés et check-list de la veille." hidden>
   <p class="eyebrow">Chapitre 13 · 90 min, à refaire la veille</p>
   <h1>Spécial entretien</h1>
-  <p class="lead">Tout ce qui se révise en dernière ligne droite : des cartes questions-réponses, les requêtes SQL qu'on te demandera presque sûrement d'écrire, les pièges des tests de lecture de code et un cas pratique complet.</p>
+  <p class="lead">Tout ce qui se révise en dernière ligne droite : des cartes questions-réponses sur tout le programme, les requêtes SQL qu'on te demandera presque sûrement d'écrire, les pièges des tests de lecture de code et deux cas pratiques chronométrés.</p>
   <ul class="goals">
     <li>répondre en une ou deux phrases claires aux questions théoriques classiques ;</li>
-    <li>écrire sans hésiter les requêtes SQL d'entretien ;</li>
-    <li>réaliser un cas pratique en 45 minutes.</li>
+    <li>écrire sans hésiter les requêtes SQL d'entretien, en pensant aux NULL ;</li>
+    <li>repérer les bugs d'un code PL/SQL en 20 minutes ;</li>
+    <li>réaliser un package complet en 45 minutes ;</li>
+    <li>préparer tes propres questions au recruteur.</li>
   </ul>
 
   <h2>Comment se passe un entretien PL/SQL</h2>
@@ -14,50 +16,64 @@
     <thead><tr><th>Format</th><th>Ce qu'on évalue</th><th>Conseil</th></tr></thead>
     <tbody>
       <tr><td>Questions théoriques</td><td>Vocabulaire, compréhension des mécanismes</td><td>Réponse courte, puis un exemple concret. Si tu ne sais pas, dis comment tu chercherais.</td></tr>
-      <tr><td>Lecture de code</td><td>« Que fait ce bloc ? Où est le bug ? »</td><td>Lis à voix haute, suis les valeurs ligne par ligne comme dans les animations du cours. Pense NULL, NO_DATA_FOUND, position du EXIT.</td></tr>
-      <tr><td>Écriture SQL</td><td>Jointures, agrégats, fonctions analytiques</td><td>Annonce ta démarche, écris d'abord la requête simple puis affine.</td></tr>
+      <tr><td>Lecture de code</td><td>« Que fait ce bloc ? Où est le bug ? »</td><td>Lis à voix haute, suis les valeurs ligne par ligne comme dans les animations du cours. Pense NULL, <code>NO_DATA_FOUND</code>, position du <code>EXIT</code>, noms de variables identiques aux colonnes.</td></tr>
+      <tr><td>Écriture SQL</td><td>Jointures, agrégats, fonctions analytiques</td><td>Annonce ta démarche, écris d'abord la requête simple puis affine. Demande-toi toujours : « et s'il y a des NULL ? des ex aequo ? zéro ligne ? »</td></tr>
       <tr><td>Exercice PL/SQL</td><td>Procédure ou package complet, gestion d'erreurs</td><td>Signature d'abord, cas nominal, puis exceptions et cas limites. Mentionne la version SQL pur si elle existe.</td></tr>
-      <tr><td>Expérience</td><td>Projets passés, performance, production</td><td>Prépare 2 histoires : une optimisation, un bug de production résolu.</td></tr>
+      <tr><td>Expérience</td><td>Projets passés, performance, production</td><td>Prépare 2 histoires : une optimisation, un bug de production résolu (contexte, mesure, action, résultat chiffré).</td></tr>
     </tbody>
   </table></div>
 
   <h2>Flashcards</h2>
-  <p class="prose">Lis la question, réponds à voix haute, puis retourne la carte. Classe-la « Je sais » ou « À revoir » : le filtre te permet de ne retravailler que les cartes difficiles. Ton classement est enregistré.</p>
+  <p class="prose">Lis la question, réponds à voix haute, puis retourne la carte. Classe-la « Je sais » ou « À revoir » : le filtre te permet de ne retravailler que les cartes difficiles. Ton classement est enregistré. Les cartes couvrent tous les chapitres, de l'architecture au SQL d'entretien.</p>
   <div id="flashcards"></div>
 
   <h2>Le SQL qu'on te demandera aussi</h2>
-  <p class="prose">Un poste PL/SQL est d'abord un poste SQL. Ces requêtes reviennent dans la grande majorité des entretiens.</p>
+  <p class="prose">Un poste PL/SQL est d'abord un poste SQL. Ces requêtes reviennent dans la grande majorité des entretiens. Les sorties correspondent au schéma d'exemple du <a href="#ch00">chapitre 00</a>.</p>
   <div class="ex" data-ex="ch13-sql1">
     <div class="ex-head"><h4>SQL 1 · Le deuxième salaire le plus élevé</h4><span class="lvl l1">classique</span></div>
     <div class="ex-body">
+      <p>Écris la requête qui renvoie le deuxième salaire le plus élevé de l'entreprise, puis généralise au N-ième.</p>
       <details class="sol"><summary>Voir la solution</summary>
         <script type="text/plsql" data-title="Trois façons">
           -- Fonction analytique (la meilleure : gère les ex aequo, généralisable au N-ième)
           SELECT DISTINCT salaire
-            FROM (SELECT salaire, DENSE_RANK() OVER (ORDER BY salaire DESC) AS rang FROM employes)
+            FROM (SELECT salaire,
+                         DENSE_RANK() OVER (ORDER BY salaire DESC NULLS LAST) AS rang
+                    FROM employes)
            WHERE rang = 2;
 
-          -- Sous-requête
+          -- Sous-requête (MAX ignore les NULL)
           SELECT MAX(salaire) FROM employes WHERE salaire < (SELECT MAX(salaire) FROM employes);
 
           -- 12c+
-          SELECT DISTINCT salaire FROM employes ORDER BY salaire DESC OFFSET 1 ROW FETCH NEXT 1 ROW ONLY;
+          SELECT DISTINCT salaire
+            FROM employes
+           WHERE salaire IS NOT NULL
+           ORDER BY salaire DESC
+          OFFSET 1 ROW FETCH NEXT 1 ROW ONLY;
         </script>
-        <p class="hint">La troisième version est piégeuse : avec des doublons au sommet, il faut un <code>DISTINCT</code> avant le <code>OFFSET</code>.</p>
+        <div class="output">7200</div>
+        <div class="callout pitfall"><span class="ct">Deux pièges dans la même question</span><p>En <code>ORDER BY … DESC</code>, Oracle place les NULL <strong>en premier</strong> (ils sont considérés comme plus grands que tout). Sans <code>NULLS LAST</code> ou <code>WHERE salaire IS NOT NULL</code>, un seul salaire inconnu décale le classement. Dans la version 12c, le <code>DISTINCT</code> est indispensable : avec deux salaires ex aequo au sommet, <code>OFFSET 1</code> renverrait encore le maximum.</p></div>
       </details>
     </div>
   </div>
   <div class="ex" data-ex="ch13-sql2">
     <div class="ex-head"><h4>SQL 2 · Le mieux payé de chaque département</h4><span class="lvl l1">classique</span></div>
     <div class="ex-body">
+      <p>Affiche, pour chaque département, l'employé (ou les employés ex aequo) au salaire le plus élevé.</p>
       <details class="sol"><summary>Voir la solution</summary>
         <script type="text/plsql" data-title="Solution">
           SELECT dept_id, nom, salaire
-            FROM (SELECT e.*, RANK() OVER (PARTITION BY dept_id ORDER BY salaire DESC) AS rg
+            FROM (SELECT e.*,
+                         RANK() OVER (PARTITION BY dept_id ORDER BY salaire DESC NULLS LAST) AS rg
                     FROM employes e)
-           WHERE rg = 1;
+           WHERE rg = 1
+           ORDER BY dept_id;
         </script>
-        <p class="hint">Différence à connaître : <code>ROW_NUMBER</code> (1, 2, 3 même en cas d'égalité), <code>RANK</code> (1, 1, 3), <code>DENSE_RANK</code> (1, 1, 2).</p>
+        <div class="output">10 Martin  9500
+20 Bernard 7200
+30 Moreau  6800</div>
+        <p class="hint">Différence à connaître : <code>ROW_NUMBER</code> (1, 2, 3 même en cas d'égalité), <code>RANK</code> (1, 1, 3), <code>DENSE_RANK</code> (1, 1, 2). Ici <code>RANK</code> garde les ex aequo ; <code>ROW_NUMBER</code> en choisirait un arbitrairement. Version sans analytique : <code>WHERE (dept_id, salaire) IN (SELECT dept_id, MAX(salaire) FROM employes GROUP BY dept_id)</code>.</p>
       </details>
     </div>
   </div>
@@ -66,93 +82,221 @@
     <div class="ex-body">
       <p>Une table <code>contacts(id, email)</code> contient des emails en double. Garde la ligne au plus petit <code>id</code> pour chaque email.</p>
       <details class="sol"><summary>Voir la solution</summary>
-        <script type="text/plsql" data-title="Solution">
+        <script type="text/plsql" data-title="Deux solutions">
+          -- Analytique : un seul passage sur la table
           DELETE FROM contacts
            WHERE ROWID IN (SELECT rid
                              FROM (SELECT ROWID AS rid,
                                           ROW_NUMBER() OVER (PARTITION BY email ORDER BY id) AS rn
                                      FROM contacts)
                             WHERE rn > 1);
+
+          -- Sous-requête corrélée : plus courte, souvent citée
+          DELETE FROM contacts c
+           WHERE c.id > (SELECT MIN(c2.id) FROM contacts c2 WHERE c2.email = c.email);
         </script>
+        <p class="hint">Les deux versions ne traitent pas les emails NULL de la même façon : <code>PARTITION BY</code> regroupe les NULL ensemble (ils sont dédoublonnés), alors que <code>c2.email = c.email</code> n'est jamais vrai pour NULL (ils sont tous conservés). Pense aussi à demander si <code>Jean@x.fr</code> et <code>jean@x.fr </code> sont des doublons : il faudrait alors partitionner sur <code>LOWER(TRIM(email))</code>. Commence par un <code>SELECT</code> avec la même condition avant de lancer le <code>DELETE</code>.</p>
       </details>
     </div>
   </div>
   <div class="ex" data-ex="ch13-sql4">
     <div class="ex-head"><h4>SQL 4 · Départements sans employé et hiérarchie</h4><span class="lvl l2">classique</span></div>
     <div class="ex-body">
-      <p>a) Liste les départements sans employé. b) Affiche l'organigramme indenté à partir de la DG.</p>
+      <p>a) Liste les départements sans employé. b) Affiche l'organigramme indenté à partir de la DG, les collègues d'un même manager triés par nom.</p>
       <details class="sol"><summary>Voir la solution</summary>
-        <script type="text/plsql" data-title="Solution">
-          -- a) NOT EXISTS (sûr même si dept_id peut être NULL dans employes, contrairement à NOT IN)
-          SELECT d.* FROM departements d
+        <script type="text/plsql" data-title="a) Départements sans employé">
+          -- NOT EXISTS : sûr même si employes.dept_id peut être NULL, contrairement à NOT IN
+          SELECT d.dept_id, d.nom
+            FROM departements d
            WHERE NOT EXISTS (SELECT 1 FROM employes e WHERE e.dept_id = d.dept_id);
 
-          -- b) Requête hiérarchique Oracle
+          -- Équivalent avec une anti-jointure explicite
+          SELECT d.dept_id, d.nom
+            FROM departements d
+            LEFT JOIN employes e ON e.dept_id = d.dept_id
+           WHERE e.emp_id IS NULL;
+        </script>
+        <div class="output">40 RH</div>
+        <script type="text/plsql" data-title="b) Requête hiérarchique Oracle">
           SELECT LPAD(' ', 2 * (LEVEL - 1)) || nom || ' (' || poste || ')' AS organigramme
             FROM employes
            START WITH manager_id IS NULL
          CONNECT BY PRIOR emp_id = manager_id
            ORDER SIBLINGS BY nom;
         </script>
+        <div class="output">Martin (DG)
+  Bernard (DIR_IT)
+    Durand (DEV)
+    Leroy (DBA)
+    Petit (DEV)
+      Garcia (STAGIAIRE)
+  Moreau (DIR_VENTES)
+    Laurent (COMMERCIAL)
+    Michel (COMMERCIAL)
+    Simon (COMMERCIAL)</div>
+        <p class="hint"><code>PRIOR</code> désigne la ligne parente : « le manager de l'enfant est l'<code>emp_id</code> du parent ». Un simple <code>ORDER BY</code> casserait l'arbre ; <code>ORDER SIBLINGS BY</code> trie seulement les frères. Bonus à citer : <code>SYS_CONNECT_BY_PATH</code>, <code>CONNECT_BY_ISLEAF</code>, et la version standard en <code>WITH</code> récursif (11g R2).</p>
       </details>
     </div>
   </div>
   <div class="ex" data-ex="ch13-sql5">
     <div class="ex-head"><h4>SQL 5 · Cumul et comparaison avec la moyenne</h4><span class="lvl l2">classique</span></div>
     <div class="ex-body">
-      <p>Pour chaque employé : son salaire, la moyenne de son département, l'écart à cette moyenne et le cumul des salaires par ordre d'embauche dans le département.</p>
+      <p>Pour chaque employé : son département, son salaire, la moyenne de son département, l'écart à cette moyenne et le cumul des salaires par ordre d'embauche dans le département.</p>
       <details class="sol"><summary>Voir la solution</summary>
         <script type="text/plsql" data-title="Solution">
-          SELECT dept_id, nom, date_embauche, salaire,
+          SELECT dept_id, nom, salaire,
                  ROUND(AVG(salaire) OVER (PARTITION BY dept_id))                 AS moy_dept,
                  salaire - ROUND(AVG(salaire) OVER (PARTITION BY dept_id))       AS ecart,
                  SUM(salaire) OVER (PARTITION BY dept_id ORDER BY date_embauche) AS cumul
             FROM employes
            ORDER BY dept_id, date_embauche;
         </script>
-        <p class="hint">Les fonctions analytiques gardent toutes les lignes, contrairement à <code>GROUP BY</code>. Question fréquente : « différence entre <code>WHERE</code> et <code>HAVING</code> » (filtre avant / après agrégation).</p>
+        <div class="output">10 Martin  9500 9500     0  9500
+20 Bernard 7200 4320  2880  7200
+20 Leroy   4800 4320   480 12000
+20 Petit   4300 4320   -20 16300
+20 Durand  3900 4320  -420 20200
+20 Garcia  1400 4320 -2920 21600
+30 Moreau  6800 3950  2850  6800
+30 Simon   3100 3950  -850  9900
+30 Laurent 2900 3950 -1050 12800
+30 Michel  3000 3950  -950 15800</div>
+        <p class="hint">Les fonctions analytiques gardent toutes les lignes, contrairement à <code>GROUP BY</code>. Piège : avec <code>ORDER BY</code> dans le <code>OVER</code>, la fenêtre par défaut est <code>RANGE UNBOUNDED PRECEDING</code> ; deux embauches le même jour reçoivent le même cumul. Pour un cumul strictement ligne à ligne, ajoute <code>ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW</code> et un critère de tri unique (<code>date_embauche, emp_id</code>). Question fréquente : « différence entre <code>WHERE</code> et <code>HAVING</code> » (filtre avant / après agrégation).</p>
+      </details>
+    </div>
+  </div>
+  <div class="ex" data-ex="ch13-sql6">
+    <div class="ex-head"><h4>SQL 6 · Effectif de chaque département, y compris vide</h4><span class="lvl l1">classique</span></div>
+    <div class="ex-body">
+      <p>Affiche tous les départements avec leur nombre d'employés et leur masse salariale. Le département RH doit apparaître avec 0.</p>
+      <details class="sol"><summary>Voir la solution</summary>
+        <script type="text/plsql" data-title="Solution">
+          SELECT d.dept_id, d.nom,
+                 COUNT(e.emp_id)          AS nb,      -- pas COUNT(*) : il compterait la ligne vide
+                 NVL(SUM(e.salaire), 0)   AS masse
+            FROM departements d
+            LEFT JOIN employes e ON e.dept_id = d.dept_id
+           GROUP BY d.dept_id, d.nom
+           ORDER BY d.dept_id;
+        </script>
+        <div class="output">10 Direction    1  9500
+20 Informatique 5 21600
+30 Ventes       4 15800
+40 RH           0     0</div>
+        <div class="callout pitfall"><span class="ct">Les trois erreurs qu'on attend</span><p>Une jointure interne fait disparaître RH. <code>COUNT(*)</code> affiche 1 pour RH, car la jointure externe produit une ligne complétée par des NULL. Enfin, ajouter un filtre sur <code>employes</code> dans le <code>WHERE</code> (par exemple <code>WHERE e.salaire &gt; 3000</code>) élimine ces lignes NULL et retransforme la jointure en jointure interne : le filtre doit aller dans le <code>ON</code>.</p></div>
       </details>
     </div>
   </div>
 
   <h2>Les pièges les plus fréquents</h2>
+  <p class="prose">Le tableau à relire la veille. Chaque ligne renvoie au chapitre qui détaille le mécanisme.</p>
   <div class="table-wrap"><table>
     <thead><tr><th>Piège</th><th>Réponse correcte</th><th>Voir</th></tr></thead>
     <tbody>
+      <tr><td><code>NULL = NULL</code></td><td>NULL, donc branche <code>ELSE</code></td><td><a href="#ch02">02</a></td></tr>
+      <tr><td><code>''</code> dans Oracle</td><td>C'est NULL</td><td><a href="#ch02">02</a></td></tr>
+      <tr><td><code>NOT IN</code> avec un NULL dans la liste</td><td>Aucune ligne renvoyée : <code>NOT EXISTS</code></td><td><a href="#ch02">02</a></td></tr>
+      <tr><td><code>ORDER BY … DESC</code> avec des NULL</td><td>Les NULL sortent en premier : <code>NULLS LAST</code></td><td>SQL 1</td></tr>
+      <tr><td><code>COUNT(*)</code> après un <code>LEFT JOIN</code></td><td>Compte la ligne vide : <code>COUNT(colonne)</code></td><td>SQL 6</td></tr>
       <tr><td><code>SELECT COUNT(*) INTO</code> sans ligne</td><td>Pas d'exception, renvoie 0</td><td><a href="#ch04">04</a></td></tr>
       <tr><td><code>UPDATE</code> qui ne touche aucune ligne</td><td>Pas d'exception, <code>SQL%ROWCOUNT = 0</code></td><td><a href="#ch04">04</a></td></tr>
-      <tr><td><code>NULL = NULL</code></td><td>NULL, donc branche ELSE</td><td><a href="#ch02">02</a></td></tr>
-      <tr><td><code>''</code> dans Oracle</td><td>C'est NULL</td><td><a href="#ch02">02</a></td></tr>
-      <tr><td><code>NOT IN</code> avec un NULL dans la liste</td><td>Aucune ligne renvoyée</td><td><a href="#ch02">02</a></td></tr>
-      <tr><td><code>EXIT WHEN %NOTFOUND</code> mal placé</td><td>Dernière ligne traitée deux fois</td><td><a href="#ch04">04</a></td></tr>
-      <tr><td><code>BULK COLLECT LIMIT</code> + <code>EXIT WHEN %NOTFOUND</code> juste après le FETCH</td><td>Le dernier lot incomplet est perdu</td><td><a href="#ch09">09</a></td></tr>
-      <tr><td>Exception dans la section DECLARE</td><td>Non traitée par le même bloc, remonte</td><td><a href="#ch05">05</a></td></tr>
+      <tr><td><code>EXIT WHEN %NOTFOUND</code> en fin de boucle</td><td>Dernière ligne traitée deux fois</td><td><a href="#ch04">04</a></td></tr>
+      <tr><td>Exception dans la section <code>DECLARE</code></td><td>Non traitée par le même bloc, remonte</td><td><a href="#ch05">05</a></td></tr>
       <tr><td><code>WHEN OTHERS THEN NULL</code></td><td>Anti-pattern : journaliser et re-lever</td><td><a href="#ch05">05</a></td></tr>
       <tr><td>Paramètre <code>OUT</code> après une exception</td><td>Non recopié (sauf <code>NOCOPY</code>)</td><td><a href="#ch06">06</a></td></tr>
+      <tr><td>Fonction avec DML appelée dans un <code>SELECT</code></td><td>ORA-14551, sauf transaction autonome</td><td><a href="#ch06">06</a></td></tr>
       <tr><td>Privilège via un rôle dans une procédure</td><td>Ignoré en <code>AUTHID DEFINER</code> : grant direct</td><td><a href="#ch06">06</a></td></tr>
-      <tr><td>Variable portant le nom d'une colonne</td><td>La colonne gagne dans le SQL</td><td><a href="#ch12">12</a></td></tr>
+      <tr><td>Variable de package et pool de connexions</td><td>L'état persiste entre utilisateurs de la même session</td><td><a href="#ch07">07</a></td></tr>
+      <tr><td><code>BULK COLLECT LIMIT</code> + <code>EXIT WHEN %NOTFOUND</code> juste après le <code>FETCH</code></td><td>Le dernier lot incomplet est perdu</td><td><a href="#ch09">09</a></td></tr>
+      <tr><td><code>FORALL</code> sur une collection creuse</td><td>ORA-22160 avec <code>1 .. COUNT</code> : <code>INDICES OF</code></td><td><a href="#ch09">09</a></td></tr>
       <tr><td>Trigger de ligne qui lit sa table</td><td>ORA-04091, trigger composé</td><td><a href="#ch10">10</a></td></tr>
       <tr><td><code>COMMIT</code> dans un trigger</td><td>ORA-04092, sauf transaction autonome</td><td><a href="#ch10">10</a></td></tr>
       <tr><td>DDL au milieu d'une transaction</td><td>Commit implicite de tout ce qui précède</td><td><a href="#ch11">11</a></td></tr>
       <tr><td>Concaténer une saisie dans du SQL dynamique</td><td>Injection : variables liées, <code>DBMS_ASSERT</code></td><td><a href="#ch11">11</a></td></tr>
-      <tr><td>Variable de package et pool de connexions</td><td>L'état persiste entre utilisateurs de la même session</td><td><a href="#ch07">07</a></td></tr>
+      <tr><td>Variable portant le nom d'une colonne</td><td>La colonne gagne dans le SQL</td><td><a href="#ch12">12</a></td></tr>
     </tbody>
   </table></div>
 
-  <h2>Cas pratique (45 minutes)</h2>
+  <h2>Cas pratique 1 : revue de code (20 minutes)</h2>
+  <p class="prose">Format très courant : on te tend un code « qui ne marche pas » et on te demande ce qu'il fait vraiment, puis de le corriger. Lis-le à voix haute avant de répondre.</p>
+  <div class="ex" data-ex="ch13-cas2">
+    <div class="ex-head"><h4>Trouve les bugs de prime_fin_annee</h4><span class="lvl l2">entretien</span></div>
+    <div class="ex-body">
+      <p>Cette procédure doit ajouter à la commission de chaque employé d'un département une prime de 10 % de son salaire, puis afficher le nom du département. Appelée avec 30, elle n'affiche rien et ne modifie rien. Explique pourquoi, liste tous les défauts (il y en a au moins six) et propose une version corrigée.</p>
+      <script type="text/plsql" data-title="Code à relire">
+        CREATE OR REPLACE PROCEDURE prime_fin_annee (dept_id IN NUMBER) IS
+          CURSOR c_emp IS
+            SELECT emp_id, salaire, commission FROM employes WHERE dept_id = dept_id;
+          l_emp      c_emp%ROWTYPE;
+          l_prime    NUMBER;
+          l_nom_dept departements.nom%TYPE;
+        BEGIN
+          SELECT nom INTO l_nom_dept FROM departements WHERE dept_id = dept_id;
+          OPEN c_emp;
+          LOOP
+            FETCH c_emp INTO l_emp;
+            l_prime := l_emp.salaire * 0.1 + l_emp.commission;
+            UPDATE employes SET commission = l_prime WHERE emp_id = l_emp.emp_id;
+            COMMIT;
+            EXIT WHEN c_emp%NOTFOUND;
+          END LOOP;
+          CLOSE c_emp;
+          DBMS_OUTPUT.PUT_LINE('Primes versées : ' || l_nom_dept);
+        EXCEPTION
+          WHEN OTHERS THEN NULL;
+        END;
+        /
+      </script>
+      <details class="sol"><summary>Voir la solution</summary>
+        <p><strong>Pourquoi rien ne se passe :</strong> dans un ordre SQL, la colonne <code>dept_id</code> masque le paramètre de même nom. <code>WHERE dept_id = dept_id</code> compare la colonne à elle-même : le <code>SELECT INTO</code> trouve les 4 départements et lève <code>TOO_MANY_ROWS</code>, que <code>WHEN OTHERS THEN NULL</code> avale. La procédure « réussit » sans rien faire.</p>
+        <ol>
+          <li><strong>Paramètre nommé comme une colonne</strong> : le curseur aussi lit les 10 employés au lieu de ceux du département. Préfixer : <code>p_dept_id</code> (<a href="#ch12">chapitre 12</a>).</li>
+          <li><strong><code>WHEN OTHERS THEN NULL</code></strong> : masque toutes les erreurs. Traiter seulement <code>NO_DATA_FOUND</code> (département inexistant) et laisser remonter le reste (<a href="#ch05">chapitre 05</a>).</li>
+          <li><strong><code>EXIT WHEN</code> en fin de boucle</strong> : après le dernier <code>FETCH</code> qui échoue, <code>l_emp</code> garde la ligne précédente, traitée une seconde fois. Ici l'effet est invisible (même calcul), mais un compteur ou un <code>INSERT</code> serait doublé (<a href="#ch04">chapitre 04</a>).</li>
+          <li><strong>Commission NULL</strong> : <code>salaire * 0.1 + NULL</code> vaut NULL, la prime des employés sans commission est perdue. Utiliser <code>NVL(commission, 0)</code> (<a href="#ch02">chapitre 02</a>).</li>
+          <li><strong><code>COMMIT</code> dans la boucle</strong> : lent, valide un travail partiel en cas d'erreur, expose à ORA-01555 (<em>fetch across commit</em>) et retire la décision à l'appelant (<a href="#ch11">chapitre 11</a>).</li>
+          <li><strong>Ligne à ligne</strong> : un curseur et un <code>UPDATE</code> par employé là où un seul <code>UPDATE</code> suffit (<a href="#ch09">chapitre 09</a>).</li>
+          <li>Bonus : le paramètre n'est pas ancré (<code>employes.dept_id%TYPE</code>) et le message ne dit pas combien d'employés ont été traités.</li>
+        </ol>
+        <script type="text/plsql" data-title="Version corrigée">
+          CREATE OR REPLACE PROCEDURE prime_fin_annee (p_dept_id IN employes.dept_id%TYPE) IS
+            l_nom_dept departements.nom%TYPE;
+          BEGIN
+            SELECT nom INTO l_nom_dept FROM departements WHERE dept_id = p_dept_id;
+
+            UPDATE employes
+               SET commission = NVL(commission, 0) + salaire * 0.1
+             WHERE dept_id = p_dept_id;
+
+            DBMS_OUTPUT.PUT_LINE(SQL%ROWCOUNT || ' prime(s) versée(s) : ' || l_nom_dept);
+          EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+              RAISE_APPLICATION_ERROR(-20010, 'Département ' || p_dept_id || ' inexistant');
+          END prime_fin_annee;
+          /
+          EXEC prime_fin_annee(30)
+          ROLLBACK;
+        </script>
+        <div class="output">4 prime(s) versée(s) : Ventes</div>
+        <p class="hint">Pas de <code>COMMIT</code> : l'appelant valide. Avec 40, la procédure affiche <code>0 prime(s) versée(s) : RH</code> ; avec 99, elle lève ORA-20010.</p>
+      </details>
+    </div>
+  </div>
+
+  <h2>Cas pratique 2 : un package complet (45 minutes)</h2>
   <div class="ex" data-ex="ch13-cas">
     <div class="ex-head"><h4>Gestion des augmentations annuelles</h4><span class="lvl l3">entretien</span></div>
     <div class="ex-body">
       <p>Écris un package <code>pkg_augmentations</code> avec une procédure publique <code>appliquer(p_annee IN PLS_INTEGER, p_nb_ok OUT PLS_INTEGER, p_nb_ko OUT PLS_INTEGER)</code> :</p>
       <ol>
-        <li>Taux : 3 % pour les employés de 5 ans d'ancienneté ou plus, 2 % sinon, 0 % pour les stagiaires.</li>
+        <li>Taux : 3 % pour les employés qui ont 5 ans d'ancienneté ou plus au 31 décembre de <code>p_annee</code>, 2 % sinon, 0 % pour les stagiaires.</li>
         <li>Une augmentation ne peut pas faire dépasser 10 000 : l'employé est alors plafonné à 10 000.</li>
         <li>Chaque modification est tracée dans <code>historique_salaires</code>.</li>
         <li>Un employé en erreur ne doit pas bloquer les autres : l'erreur est journalisée (transaction autonome) et comptée.</li>
         <li>Le traitement doit être performant pour 1 million d'employés.</li>
-        <li>Pas de <code>COMMIT</code> dans le package : l'appelant décide.</li>
+        <li>Pas de <code>COMMIT</code> de la transaction principale dans le package : l'appelant décide.</li>
       </ol>
-      <p class="hint">Avant d'ouvrir la solution : écris la spécification, puis le corps. Réfléchis à l'option SQL pur et à l'option <code>FORALL … SAVE EXCEPTIONS</code>.</p>
+      <p class="hint">Avant d'ouvrir la solution : écris la spécification, puis le corps. Pose-toi les questions de cas limites : ancienneté pile à 5 ans, salaire déjà au-dessus du plafond, salaire NULL. Réfléchis à l'option SQL pur et à l'option <code>FORALL … SAVE EXCEPTIONS</code>.</p>
       <details class="sol"><summary>Voir une solution</summary>
         <script type="text/plsql" data-title="Spécification">
           CREATE OR REPLACE PACKAGE pkg_augmentations AS
@@ -168,13 +312,17 @@
         <script type="text/plsql" data-title="Corps">
           CREATE OR REPLACE PACKAGE BODY pkg_augmentations AS
 
-            PROCEDURE journaliser (p_emp_id IN NUMBER, p_code IN NUMBER) IS
+            c_programme CONSTANT VARCHAR2(30) := 'pkg_augmentations.appliquer';
+
+            -- Journalise un échec sans toucher à la transaction de l'appelant
+            PROCEDURE journaliser (p_emp_id IN NUMBER, p_code IN PLS_INTEGER) IS
               PRAGMA AUTONOMOUS_TRANSACTION;
+              l_msg journal_erreurs.message%TYPE;
             BEGIN
+              l_msg := 'emp ' || p_emp_id || ' : ' || SQLERRM(-p_code);  -- SQLERRM interdit dans un ordre SQL
               INSERT INTO journal_erreurs (programme, code, message)
-              VALUES ('pkg_augmentations.appliquer', -p_code,
-                      'emp ' || p_emp_id || ' : ' || SQLERRM(-p_code));
-              COMMIT;
+              VALUES (c_programme, -p_code, l_msg);
+              COMMIT;                                       -- valide le journal seulement
             END journaliser;
 
             PROCEDURE appliquer (
@@ -182,18 +330,19 @@
               p_nb_ok  OUT PLS_INTEGER,
               p_nb_ko  OUT PLS_INTEGER
             ) IS
+              -- 5 ans ou plus au 31/12/p_annee  <=>  embauché avant le 01/01/(p_annee - 4)
+              l_limite CONSTANT DATE := TO_DATE((p_annee - 4) || '-01-01', 'YYYY-MM-DD');
+
               CURSOR c_cibles IS
                 SELECT emp_id,
                        salaire AS ancien,
                        LEAST(c_plafond,
-                             ROUND(salaire * (1 + CASE
-                                                    WHEN poste = 'STAGIAIRE' THEN 0
-                                                    WHEN MONTHS_BETWEEN(TO_DATE(p_annee || '-12-31', 'YYYY-MM-DD'),
-                                                                        date_embauche) >= 60 THEN 0.03
-                                                    ELSE 0.02
-                                                  END), 2)) AS nouveau
+                             ROUND(salaire * CASE WHEN date_embauche < l_limite THEN 1.03
+                                                  ELSE 1.02
+                                             END, 2)) AS nouveau
                   FROM employes
-                 WHERE poste <> 'STAGIAIRE' OR poste IS NULL;
+                 WHERE (poste <> 'STAGIAIRE' OR poste IS NULL)   -- 0 % : rien à mettre à jour
+                   AND salaire < c_plafond;                      -- exclut aussi les salaires NULL
 
               TYPE t_ids  IS TABLE OF employes.emp_id%TYPE;
               TYPE t_sals IS TABLE OF employes.salaire%TYPE;
@@ -218,21 +367,23 @@
                   WHEN e_bulk THEN
                     FOR j IN 1 .. SQL%BULK_EXCEPTIONS.COUNT LOOP
                       l_ko(SQL%BULK_EXCEPTIONS(j).ERROR_INDEX) := TRUE;
-                      journaliser(l_ids(SQL%BULK_EXCEPTIONS(j).ERROR_INDEX), SQL%BULK_EXCEPTIONS(j).ERROR_CODE);
+                      journaliser(l_ids(SQL%BULK_EXCEPTIONS(j).ERROR_INDEX),
+                                  SQL%BULK_EXCEPTIONS(j).ERROR_CODE);
                     END LOOP;
                 END;
 
-                -- Historique uniquement pour les lignes réussies
-                FOR i IN 1 .. l_ids.COUNT LOOP
+                -- Retire les lignes en erreur : l_ids devient creuse, l_anc et l_nouv restent denses
+                FOR i IN 1 .. l_ids.COUNT LOOP                 -- bornes évaluées une seule fois
                   IF l_ko.EXISTS(i) THEN
                     p_nb_ko := p_nb_ko + 1;
-                    l_ids.DELETE(i);                    -- la collection devient creuse
+                    l_ids.DELETE(i);
                   ELSE
                     p_nb_ok := p_nb_ok + 1;
                   END IF;
                 END LOOP;
 
-                FORALL i IN INDICES OF l_ids              -- gère la collection creuse
+                -- Historique uniquement pour les lignes réussies
+                FORALL i IN INDICES OF l_ids                   -- seulement les indices encore présents
                   INSERT INTO historique_salaires (emp_id, ancien_salaire, nouveau_salaire)
                   VALUES (l_ids(i), l_anc(i), l_nouv(i));
               END LOOP;
@@ -252,30 +403,70 @@
           BEGIN
             pkg_augmentations.appliquer(2026, l_ok, l_ko);
             DBMS_OUTPUT.PUT_LINE(l_ok || ' augmentés, ' || l_ko || ' en erreur');
-            COMMIT;
           END;
           /
+          ROLLBACK;   -- en production, l'appelant ferait COMMIT
         </script>
+        <div class="output">9 augmentés, 0 en erreur</div>
+        <p class="prose">Sur le schéma d'exemple, en 2026, la limite est le 01/01/2022 : Laurent (embauché en 2022) et Michel (2023) ont moins de 5 ans au 31/12/2026, Garcia est stagiaire.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Employé</th><th>Embauche</th><th>Taux</th><th>Avant</th><th>Après</th></tr></thead>
+          <tbody>
+            <tr><td>Martin</td><td>2015-03-01</td><td>3 %</td><td>9500</td><td>9785</td></tr>
+            <tr><td>Bernard</td><td>2016-06-15</td><td>3 %</td><td>7200</td><td>7416</td></tr>
+            <tr><td>Moreau</td><td>2017-02-01</td><td>3 %</td><td>6800</td><td>7004</td></tr>
+            <tr><td>Leroy</td><td>2018-04-23</td><td>3 %</td><td>4800</td><td>4944</td></tr>
+            <tr><td>Petit</td><td>2019-09-02</td><td>3 %</td><td>4300</td><td>4429</td></tr>
+            <tr><td>Simon</td><td>2020-05-18</td><td>3 %</td><td>3100</td><td>3193</td></tr>
+            <tr><td>Durand</td><td>2021-01-11</td><td>3 %</td><td>3900</td><td>4017</td></tr>
+            <tr><td>Laurent</td><td>2022-10-03</td><td>2 %</td><td>2900</td><td>2958</td></tr>
+            <tr><td>Michel</td><td>2023-02-20</td><td>2 %</td><td>3000</td><td>3060</td></tr>
+            <tr><td>Garcia</td><td>2024-09-01</td><td>0 %</td><td>1400</td><td>1400 (non traité)</td></tr>
+          </tbody>
+        </table></div>
         <p><strong>Points à commenter devant le recruteur :</strong></p>
         <ul>
-          <li>Les stagiaires (0 %) sont exclus dès la requête : inutile de les mettre à jour.</li>
+          <li><strong>Ancienneté</strong> : « 5 ans au 31/12/2026 » équivaut à « embauché au plus tard le 31/12/2021 ». Comparer à <code>date_embauche &lt; 01/01/2022</code> règle à la fois le cas « pile 5 ans » et une éventuelle heure dans la date, et reste compatible avec un index, contrairement à un calcul <code>MONTHS_BETWEEN</code> appliqué à la colonne.</li>
+          <li><strong>Plafond</strong> : <code>LEAST(10000, …)</code> seul ferait <em>baisser</em> un salaire déjà supérieur à 10 000. Le filtre <code>salaire &lt; c_plafond</code> écarte ces employés (et les salaires NULL) : ils n'ont rien à recevoir.</li>
+          <li>Les stagiaires (0 %) sont exclus dès la requête : inutile de les mettre à jour ni de les tracer.</li>
           <li>Le calcul est fait <strong>en SQL</strong> dans le curseur, les écritures en <strong>FORALL</strong> par lots de 1 000 : mémoire bornée, peu de changements de contexte.</li>
-          <li><code>SAVE EXCEPTIONS</code> isole les lignes en erreur ; le journal est en transaction autonome pour survivre à un éventuel <code>ROLLBACK</code> de l'appelant.</li>
-          <li><code>INDICES OF</code> parce que la collection devient creuse après suppression des lignes en erreur.</li>
-          <li>Si le trigger d'audit du chapitre 10 existe, l'insertion dans l'historique ferait doublon : il faut choisir l'un ou l'autre.</li>
-          <li>Alternative sans gestion fine des erreurs : un seul <code>UPDATE</code> + un <code>INSERT … SELECT</code> dans l'historique, ou un <code>UPDATE</code> avec la clause <code>LOG ERRORS INTO</code> (table créée par <code>DBMS_ERRLOG</code>), qui fait le même travail que <code>SAVE EXCEPTIONS</code> en SQL pur.</li>
+          <li><code>SAVE EXCEPTIONS</code> isole les lignes en erreur. <code>ERROR_INDEX</code> est la position dans le <code>FORALL</code> : comme il parcourt <code>1 .. COUNT</code>, c'est aussi l'indice dans <code>l_ids</code>. <code>ERROR_CODE</code> est positif, d'où le <code>-p_code</code> pour <code>SQLERRM</code>.</li>
+          <li><code>INDICES OF l_ids</code> parce que <code>l_ids</code> devient creuse ; <code>FORALL i IN 1 .. l_ids.COUNT</code> lèverait ORA-22160. <code>l_anc</code> et <code>l_nouv</code> restent denses : on les lit avec les indices encore présents dans <code>l_ids</code>, qui correspondent toujours à la même ligne. Le <code>FETCH</code> suivant réinitialise les trois collections.</li>
+          <li>Le journal est en transaction autonome : son <code>COMMIT</code> ne valide que le journal, qui survit à un éventuel <code>ROLLBACK</code> de l'appelant. <code>SQLERRM</code> ne peut pas être appelé dans un ordre SQL : on passe par une variable.</li>
+          <li><strong>Interactions avec le chapitre 10</strong> : si le trigger <code>trg_employes_audit_sal</code> existe, l'insertion dans l'historique ferait doublon ; il faut choisir l'un ou l'autre. Si <code>trg_sal_plafond</code> rejette une ligne, elle arrive dans <code>SQL%BULK_EXCEPTIONS</code> avec le code 20300, mais <code>SQLERRM(-20300)</code> ne restitue pas le message personnalisé du trigger.</li>
+          <li><strong>Limites assumées</strong> : un employé supprimé par une autre session entre la lecture et l'<code>UPDATE</code> est compté « ok » alors que rien n'a été modifié (on pourrait vérifier <code>SQL%BULK_ROWCOUNT(i)</code>) ; pour se protéger des modifications concurrentes, on ajouterait <code>FOR UPDATE</code> au curseur, au prix d'un verrou sur toutes les lignes ciblées.</li>
+          <li><strong>Alternative SQL pur</strong>, sans gestion fine des erreurs : un <code>INSERT … SELECT</code> dans l'historique puis un seul <code>UPDATE</code> avec la même expression, ou un <code>UPDATE</code> avec la clause <code>LOG ERRORS INTO</code> (table créée par <code>DBMS_ERRLOG.CREATE_ERROR_LOG</code>), qui joue en SQL un rôle proche de <code>SAVE EXCEPTIONS</code>. Sur un million de lignes, c'est souvent la solution la plus rapide : dis-le.</li>
         </ul>
       </details>
     </div>
   </div>
 
+  <h2>Quiz</h2>
+  <p class="prose">Cinq questions de lecture de code, du type de celles posées en entretien écrit.</p>
+  <div data-quiz="ch13"></div>
+
+  <h2>Les questions à poser au recruteur</h2>
+  <p class="prose">En fin d'entretien, « Avez-vous des questions ? » n'est pas une formalité : de bonnes questions montrent que tu sais à quoi ressemble un vrai projet PL/SQL, et les réponses t'apprennent beaucoup sur le poste.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Question</th><th>Ce que la réponse t'apprend</th></tr></thead>
+    <tbody>
+      <tr><td>Quelle version d'Oracle utilisez-vous ? Une migration est-elle prévue ?</td><td>Si tu pourras utiliser les nouveautés (12c, 19c, 23ai) ou si tu maintiendras du 11g.</td></tr>
+      <tr><td>Quelle part du métier est en PL/SQL, et quelle part dans l'application (Java, .NET…) ?</td><td>Si le PL/SQL est le cœur du système ou une couche de procédures appelées par l'application.</td></tr>
+      <tr><td>Comment le code est-il versionné, testé et déployé ?</td><td>Git, revue de code, tests utPLSQL, intégration continue, outils de déploiement (Liquibase, Flyway) : le niveau de maturité de l'équipe.</td></tr>
+      <tr><td>Quels volumes traitez-vous, et y a-t-il des traitements de nuit ?</td><td>Si la performance (<code>BULK</code>, parallélisme, partitionnement) sera ton quotidien.</td></tr>
+      <tr><td>Qui s'occupe des DBA, des plans d'exécution, de la production ?</td><td>Ton périmètre réel, et l'existence d'astreintes.</td></tr>
+      <tr><td>À quoi ressemblerait mon premier mois ?</td><td>L'accompagnement prévu pour un profil débutant confirmé.</td></tr>
+    </tbody>
+  </table></div>
+
   <h2>Check-list de la veille</h2>
   <ul class="prose">
     <li>Refaire les flashcards marquées « à revoir ».</li>
     <li>Relire le tableau des pièges ci-dessus.</li>
-    <li>Écrire de tête : un curseur explicite complet, un <code>BULK COLLECT … LIMIT</code> + <code>FORALL</code>, un package avec spécification et corps, un trigger composé.</li>
+    <li>Écrire de tête : un curseur explicite complet, un <code>BULK COLLECT … LIMIT</code> + <code>FORALL … SAVE EXCEPTIONS</code>, un package avec spécification et corps, un trigger composé.</li>
+    <li>Réécrire sans regarder SQL 1, SQL 2 et SQL 6, en pensant aux NULL.</li>
     <li>Préparer deux histoires concrètes : une optimisation, un incident de production.</li>
-    <li>Préparer tes questions : version d'Oracle, part de PL/SQL vs Java, outils (Git, CI, utPLSQL), volumétrie, astreintes.</li>
+    <li>Choisir trois questions à poser au recruteur dans le tableau ci-dessus.</li>
   </ul>
   <div class="callout tip"><span class="ct">Le jour J</span><p>Quand tu ne sais pas : dis ce que tu sais du sujet voisin et comment tu vérifierais (documentation Oracle, test rapide dans une base). Un recruteur préfère un raisonnement honnête à une réponse inventée.</p></div>
 </section>
